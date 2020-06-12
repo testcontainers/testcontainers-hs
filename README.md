@@ -1,53 +1,29 @@
-# Example
+Testcontainers is a Haskell library that provides a friendly API to run Docker
+container. It is designed to create runtime environment to use during your automatic
+tests.
 
 ``` haskell
-{-# LANGUAGE OverloadedStrings #-}
 module Main where
 
-import           Control.Monad.Trans.Resource (ResIO, allocate, runResourceT)
-import           Data.Function                ((&))
-import           Data.Text.Lazy               (isInfixOf)
-import qualified TestContainer                as TC
+import           Test.Tasty
+import           Test.Tasty.HUnit
+import           TestContainer.Tasty (MonadDocker, defaultContainerRequest,
+                                      redis, run, withContainers)
+
+containers :: MonadDocker m => m ()
+containers = do
+  _ <- run redis defaultContainerRequest
+  pure ()
+
 
 main :: IO ()
-main = do
-
-  -- Spin up the redis container
-  redis <- TC.run TC.redis $ TC.defaultContainerRequest
-    & TC.setExpose [6379]
-    & TC.setName "redis"
-
-  TC.waitUntilReady redis $ TC.waitForLogLine TC.Stdout
-    ("Ready to accept connections" `isInfixOf`)
-
-  -- connect to redis and have some fun...
-
-  TC.kill redis
-
-
--- Similar to main but with auto resource cleanup in error cases.
-main1 :: IO ()
-main1 = runResourceT $ do
-
-  let
-    -- A small helper that runs a Docker container and makes sure to stop it
-    -- once we are done.
-    docker :: TC.ToImage -> TC.ContainerRequest -> ResIO TC.Container
-    docker image request = do
-      (_, container) <- allocate (TC.run image request) TC.stop
-      pure container
-
-  -- Spin up the redis container
-  redis <- docker TC.redis $ TC.defaultContainerRequest
-    & TC.setExpose [6379]
-    & TC.setName "redis"
-
-  TC.waitUntilReady redis $ TC.waitForLogLine TC.Stdout
-    ("Ready to accept connections" `isInfixOf`)
-
-  -- connect to redis and have some fun...
-
-  -- Note: No need for manual cleanup!
-  -- TC.kill redis
-
+main = defaultMain $ testGroup "TestContainer tests"
+  [
+    withContainers containers $ \setup ->
+      testCase "test1" $ do
+        -- Start up the containers defined by `containers`. The library takes care
+        -- of stopping and removing the containers once the test has completed.
+        setup
+        return ()
+  ]
 ```
