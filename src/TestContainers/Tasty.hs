@@ -31,7 +31,7 @@ import           TestContainers                        as Reexports
 -- @
 --
 -- containers :: MonadDocker m => m ()
--- containers run = do
+-- containers = do
 --   _redis <- TestContainers.run TestContainers.redis TestContainers.defaultContainerRequest
 --   _kafka <- TestContainers.run TestContainers.kafka TestContainers.defaultContainerRequest
 --   pure ()
