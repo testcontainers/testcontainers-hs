@@ -1,4 +1,4 @@
-module Main where
+module TestContainers.TastySpec(main, test_all) where
 
 import           Test.Tasty
 import           Test.Tasty.HUnit
@@ -14,7 +14,10 @@ containers1 = do
 
 
 main :: IO ()
-main = defaultMain $ testGroup "TestContainers tests"
+main = defaultMain test_all
+
+test_all :: TestTree
+test_all = testGroup "TestContainers tests"
   [
     withContainers containers1 $ \setup ->
       testCase "test1" $ do
