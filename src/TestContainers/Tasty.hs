@@ -1,6 +1,6 @@
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module TestContainer.Tasty
+module TestContainers.Tasty
   (
     -- * Running containers for tests
     withContainers
@@ -18,11 +18,11 @@ import           Control.Monad.Trans.Resource.Internal (stateAlloc,
 import           Data.Acquire                          (ReleaseType (ReleaseNormal))
 import           Test.Tasty                            (TestTree, withResource)
 
-import           TestContainer                         (Container,
+import           TestContainers                        (Container,
                                                         ContainerRequest,
                                                         MonadDocker, ToImage,
                                                         run, stop)
-import           TestContainer                         as Reexports
+import           TestContainers                        as Reexports
 
 
 -- | Allow `Tasty.TestTree` to depend on Docker containers. Tasty takes care of
@@ -32,8 +32,8 @@ import           TestContainer                         as Reexports
 --
 -- containers :: MonadDocker m => m ()
 -- containers run = do
---   _redis <- TestContainer.run TestContainer.redis TestContainer.defaultContainerRequest
---   _kafka <- TestContainer.run TestContainer.kafka TestContainer.defaultContainerRequest
+--   _redis <- TestContainers.run TestContainers.redis TestContainers.defaultContainerRequest
+--   _kafka <- TestContainers.run TestContainers.kafka TestContainers.defaultContainerRequest
 --   pure ()
 --
 -- example :: TestTree

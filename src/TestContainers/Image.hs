@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module TestContainer.Image
+module TestContainers.Image
   (
     -- * Collection of pre-defined Docker images
     redis
@@ -11,10 +11,10 @@ module TestContainer.Image
 
   ) where
 
-import           TestContainer.Docker as Docker (Image (..), ToImage, build,
-                                                 fromBuildContext,
-                                                 fromDockerfile, fromTag,
-                                                 fromTarballContext)
+import           TestContainers.Docker as Docker (Image (..), ToImage, build,
+                                                  fromBuildContext,
+                                                  fromDockerfile, fromTag,
+                                                  fromTarballContext)
 
 
 -- | Image for Redis database.

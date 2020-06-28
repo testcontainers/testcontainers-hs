@@ -6,7 +6,7 @@
 {-# LANGUAGE PatternSynonyms       #-}
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
-module TestContainer.Docker
+module TestContainers.Docker
   (
     MonadDocker
 
