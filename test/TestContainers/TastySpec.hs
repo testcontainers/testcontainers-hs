@@ -1,9 +1,9 @@
-module Main where
+module TestContainers.TastySpec(main, test_all) where
 
 import           Test.Tasty
 import           Test.Tasty.HUnit
-import           TestContainer.Tasty (MonadDocker, defaultContainerRequest,
-                                      redis, run, withContainers)
+import           TestContainers.Tasty (MonadDocker, defaultContainerRequest,
+                                       redis, run, withContainers)
 
 
 containers1
@@ -14,7 +14,10 @@ containers1 = do
 
 
 main :: IO ()
-main = defaultMain $ testGroup "TestContainer tests"
+main = defaultMain test_all
+
+test_all :: TestTree
+test_all = testGroup "TestContainers tests"
   [
     withContainers containers1 $ \setup ->
       testCase "test1" $ do
