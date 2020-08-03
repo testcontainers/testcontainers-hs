@@ -44,6 +44,10 @@ test-suite tests
   ghc-options:         -Wall
   type:                exitcode-stdio-1.0
   main-is:             Driver.hs
+  other-modules:       TestContainers.HspecSpec
+                       TestContainers.TastySpec
+  build-tool-depends:  hspec-discover:hspec-discover,
+                       tasty-discover:tasty-discover
   build-depends:       base,
                        hspec,
                        tasty,

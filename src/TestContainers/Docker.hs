@@ -31,10 +31,14 @@ module TestContainers.Docker
 
   , build
 
+  -- * Exceptions
+
+  , DockerException(..)
+
   -- * Running containers
 
   , ContainerRequest
-  , defaultContainerRequest
+  , containerRequest
   , setName
   , setCmd
   , setRm
@@ -42,6 +46,7 @@ module TestContainers.Docker
   , setLink
   , setExpose
   , setPublish
+  , setWaitingFor
   , run
 
   -- * Managing the container lifecycle
@@ -72,6 +77,7 @@ module TestContainers.Docker
 
 import           Control.Monad.Catch          (Exception, MonadCatch, MonadMask,
                                                MonadThrow, bracket, throwM)
+import           Control.Monad.Fix            (mfix)
 import           Control.Monad.IO.Class       (MonadIO (liftIO))
 import           Control.Monad.IO.Unlift      (MonadUnliftIO (withRunInIO))
 import           Control.Monad.Trans.Resource (MonadResource (liftResourceT),
@@ -83,10 +89,28 @@ import           Data.Text                    (Text, pack, strip, unpack)
 import           Data.Text.Encoding.Error     (lenientDecode)
 import qualified Data.Text.Lazy               as LazyText
 import qualified Data.Text.Lazy.Encoding      as LazyText
-import           Prelude                      hiding (id)
+import           Prelude                      hiding (error, id)
+import           System.Exit                  (ExitCode(..))
 import           System.IO                    (Handle, hClose)
 import qualified System.Process               as Process
 import           System.Timeout               (timeout)
+
+
+-- | Failing to interact with Docker results in this exception
+-- being thrown.
+data DockerException = DockerException
+  {
+    -- | Exit code of the underlying Docker process.
+    exitCode :: ExitCode
+    -- | Arguments that were passed to Docker.
+  , args     :: [Text]
+    -- | Docker's STDERR output.
+  , stderr   :: Text
+  }
+  deriving (Eq, Show)
+
+
+instance Exception DockerException
 
 
 -- | Docker related functionality is parameterized over this `Monad`.
@@ -97,7 +121,8 @@ type MonadDocker m =
 -- | Parameters for a running a Docker container.
 data ContainerRequest = ContainerRequest
   {
-    cmd          :: Maybe [Text]
+    toImage      :: ToImage
+  , cmd          :: Maybe [Text]
   , env          :: [(Text, Text)]
   , exposedPorts :: [Int]
   , publishPorts :: [Text]
@@ -105,14 +130,16 @@ data ContainerRequest = ContainerRequest
   , links        :: [ContainerId]
   , name         :: Maybe Text
   , rmOnExit     :: Bool
+  , readiness    :: Maybe WaitUntilReady
   }
 
 
 -- | Default `ContainerRequest`. Used as base for every Docker container.
-defaultContainerRequest :: ContainerRequest
-defaultContainerRequest = ContainerRequest
+containerRequest :: ToImage -> ContainerRequest
+containerRequest image = ContainerRequest
   {
-    name         = Nothing
+    toImage      = image
+  , name         = Nothing
   , cmd          = Nothing
   , env          = []
   , exposedPorts = []
@@ -120,6 +147,7 @@ defaultContainerRequest = ContainerRequest
   , volumeMounts = []
   , links        = []
   , rmOnExit     = True
+  , readiness    = Nothing
   }
 
 
@@ -166,16 +194,22 @@ setPublish newPublish req =
   req { publishPorts = newPublish }
 
 
+-- | Set the waiting strategy on the container.
+setWaitingFor :: WaitUntilReady -> ContainerRequest -> ContainerRequest
+setWaitingFor newWaitingFor req =
+  req { readiness = Just newWaitingFor }
+
+
 -- | Runs a Docker container from an `Image` and `ContainerRequest`. A finalizer
 -- is registered so that the container is aways stopped when it goes out of scope.
-run :: MonadDocker m => ToImage -> ContainerRequest -> m Container
-run toImage containerRequest = do
-  image@Image{ tag } <- runToImage toImage
+run :: MonadDocker m => ContainerRequest -> m Container
+run request = liftResourceT $ do
 
   let
     ContainerRequest
       {
-        name
+        toImage
+      , name
       , cmd
       , env
       , exposedPorts
@@ -183,8 +217,12 @@ run toImage containerRequest = do
       , volumeMounts
       , links
       , rmOnExit
-      } = containerRequest
+      , readiness
+      } = request
 
+  image@Image{ tag } <- runToImage toImage
+
+  let
     dockerRun :: [Text]
     dockerRun = concat $
       [ [ "run" ] ] ++
@@ -199,60 +237,68 @@ run toImage containerRequest = do
       [ [ tag ] ] ++
       [ command | Just command <- [cmd] ]
 
-  (_exitCode, stdout, _stderr) <- liftIO $ Process.readProcessWithExitCode
-    "docker"
-    (map unpack dockerRun)
-    ""
+  stdout <- docker dockerRun
 
   let
-    containerId :: ContainerId
-    !containerId =
+    id :: ContainerId
+    !id =
+      -- N.B. Force to not leak STDOUT String
       strip (pack stdout)
 
-  releaseKey <- register (stop' containerId)
+  container <- mfix $ \container -> do
+    -- Note: We have to tie the knot as the resulting container
+    -- carries the release key as well.
+    releaseKey <- register $ runResourceT (stop container)
+    pure $ Container
+      {
+        id
+      , releaseKey
+      , image
+      }
 
-  pure $ Container
-    {
-      id = strip (pack stdout)
-    , releaseKey
-    , image
-    }
+  case readiness of
+    Just wait ->
+      waitUntilReady container wait
+    Nothing ->
+      pure ()
+
+  pure container
+
+
+-- | Internal function that runs Docker. Takes care of throwing an exception
+-- in case of failure.
+docker :: MonadIO m => [Text] -> m String
+docker args = liftIO $ do
+  (exitCode, stdout, stderr) <- Process.readProcessWithExitCode "docker"
+    (map unpack args) ""
+
+  case exitCode of
+    ExitSuccess -> pure stdout
+    _ -> throwM $ DockerException
+      {
+        exitCode, args
+      , stderr = pack stderr
+      }
 
 
 -- | Kills a Docker container.
 kill :: MonadDocker m => Container -> m ()
 kill Container { id } = do
-  (_exitCode, _stdout, _stderr) <- liftIO $ Process.readProcessWithExitCode
-    "docker"
-    [ "kill", unpack id ]
-    ""
+  _ <- docker [ "kill", id ]
   return ()
 
 
 -- | Stops a Docker container.
 stop :: MonadDocker m => Container -> m ()
 stop Container { id } = do
-  stop' id
-
-
--- | Stops a Docker container. Referring to the container only by ID. This is
--- considered internal.
-stop' :: MonadIO m => ContainerId -> m ()
-stop' containerId = do
-  (_exitCode, _stdout, _stderr) <- liftIO $ Process.readProcessWithExitCode
-    "docker"
-    [ "stop", unpack containerId ]
-    ""
+  _ <- docker [ "stop", id ]
   return ()
 
 
 -- | Remove a Docker container.
 rm :: MonadDocker m => Container -> m ()
 rm Container { id } = do
-  (_exitCode, _stdout, _stderr) <- liftIO $ Process.readProcessWithExitCode
-    "docker"
-    [ "rm", "-f", "-v", unpack id ]
-    ""
+  _ <- docker [ "rm", "-f", "-v", id ]
   return ()
 
 
@@ -318,13 +364,10 @@ defaultToImage action = ToImage
 -- | Get an `Image` from a tag.
 fromTag :: ImageTag -> ToImage
 fromTag imageTag = defaultToImage $ do
-  (_exitCode, stdout, _stderr) <- liftIO $ Process.readProcessWithExitCode
-    "docker"
-    [ "pull", "--quiet", unpack imageTag ]
-    ""
+  output <- docker [ "pull", "--quiet", imageTag ]
   return $ Image
     {
-      tag = strip (pack stdout)
+      tag = strip (pack output)
     }
 
 
@@ -360,11 +403,32 @@ fromDockerfile =
 type ContainerId = Text
 
 
+-- | Dumb logger abstraction to allow us to trace container execution.
+data Logger = Logger
+  {
+    debug :: forall m . MonadIO m => Text -> m ()
+  , info  :: forall m . MonadIO m => Text -> m ()
+  , warn  :: forall m . MonadIO m => Text -> m ()
+  , error :: forall m . MonadIO m => Text -> m ()
+  }
+
+
+-- | Logger that doesn't log anything.
+silentLogger :: Logger
+silentLogger = Logger
+  {
+    debug = \_ -> pure ()
+  , info  = \_ -> pure ()
+  , warn  = \_ -> pure ()
+  , error = \_ -> pure ()
+  }
+
+
 -- | A strategy that describes how to asses readiness of a `Container`. Allows
 -- Users to plug in their definition of readiness.
 newtype WaitUntilReady = WaitUntilReady
   {
-    checkContainerReady :: Container -> ResIO ()
+    checkContainerReady :: Logger -> Container -> ResIO ()
   }
 
 
@@ -397,9 +461,10 @@ instance Exception TimeoutException
 -- to be ready. If the container is not ready by then a `TimeoutException` will
 -- be thrown.
 waitUntilTimeout :: Int -> WaitUntilReady -> WaitUntilReady
-waitUntilTimeout microseconds wait = WaitUntilReady $ \container@Container{ id } -> do
+waitUntilTimeout microseconds wait = WaitUntilReady $ \logger container@Container{ id } -> do
   withRunInIO $ \runInIO -> do
-    result <- timeout microseconds $ runInIO (checkContainerReady wait container)
+    result <- timeout microseconds $
+      runInIO (checkContainerReady wait logger container)
     case result of
       Nothing ->
         throwM $ TimeoutException { id }
@@ -413,7 +478,7 @@ waitUntilTimeout microseconds wait = WaitUntilReady $ \container@Container{ id }
 -- The `Handle`s passed to the function argument represent @stdout@ and @stderr@
 -- of the container.
 waitWithLogs :: (Container -> Handle -> Handle -> IO ()) -> WaitUntilReady
-waitWithLogs waiter = WaitUntilReady $ \container -> do
+waitWithLogs waiter = WaitUntilReady $ \_logger container -> do
   withLogs container $ \stdout stderr ->
     liftIO $ waiter container stdout stderr
 
@@ -458,6 +523,13 @@ waitForLogLine whereToLook matches = waitWithLogs $ \Container { id } stdout std
     Nothing -> throwM $ UnexpectedEndOfPipe { id }
 
 
+-- | Blocks until the container is ready. `waitUntilReady` might throw exceptions
+-- depending on the used `WaitUntilReady` on the container.
+waitUntilReady :: MonadDocker m => Container -> WaitUntilReady -> m ()
+waitUntilReady container waiter =
+  liftResourceT $ checkContainerReady waiter silentLogger container
+
+
 -- | Handle to a Docker image.
 data Image = Image
   {
@@ -478,10 +550,3 @@ data Container = Container
     -- | The underlying `Image` of this container.
   , image      :: Image
   }
-
-
--- | Blocks until the container is ready. `waitUntilReady` might throw exceptions
--- depending on the used `WaitUntilReady` on the container.
-waitUntilReady :: MonadDocker m => Container -> WaitUntilReady -> m ()
-waitUntilReady container waiter =
-  liftResourceT $ checkContainerReady waiter container

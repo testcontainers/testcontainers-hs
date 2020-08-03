@@ -2,14 +2,15 @@ module TestContainers.TastySpec(main, test_all) where
 
 import           Test.Tasty
 import           Test.Tasty.HUnit
-import           TestContainers.Tasty (MonadDocker, defaultContainerRequest,
-                                       redis, run, withContainers)
+import           TestContainers.Tasty (MonadDocker, containerRequest, redis,
+                                       run, setExpose, withContainers, (&))
 
 
 containers1
   :: MonadDocker m => m ()
 containers1 = do
-  _ <- run redis defaultContainerRequest
+  _ <- run $ containerRequest redis
+    & setExpose [1234]
   pure ()
 
 
@@ -20,7 +21,13 @@ test_all :: TestTree
 test_all = testGroup "TestContainers tests"
   [
     withContainers containers1 $ \setup ->
-      testCase "test1" $ do
-        setup
-        return ()
+      testGroup "Multiple tests"
+      [
+        testCase "test1" $ do
+          setup
+          return ()
+      , testCase "test2" $ do
+          setup
+          return ()
+      ]
   ]
