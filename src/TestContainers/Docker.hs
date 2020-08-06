@@ -26,7 +26,6 @@ module TestContainers.Docker
 
   , fromTag
   , fromBuildContext
-  , fromTarballContext
   , fromDockerfile
 
   , build
@@ -45,12 +44,14 @@ module TestContainers.Docker
   , setEnv
   , setLink
   , setExpose
-  , setPublish
   , setWaitingFor
   , run
 
   -- * Managing the container lifecycle
 
+  , mappedPort
+
+  , inspect
   , stop
   , kill
   , rm
@@ -73,8 +74,12 @@ module TestContainers.Docker
   -- * Reexports for convenience
   , ResIO
   , runResourceT
+
+  , (&)
   ) where
 
+import           Control.Exception            (throw)
+import           Control.Lens                 ((^?))
 import           Control.Monad.Catch          (Exception, MonadCatch, MonadMask,
                                                MonadThrow, bracket, throwM)
 import           Control.Monad.Fix            (mfix)
@@ -83,30 +88,47 @@ import           Control.Monad.IO.Unlift      (MonadUnliftIO (withRunInIO))
 import           Control.Monad.Trans.Resource (MonadResource (liftResourceT),
                                                ReleaseKey, ResIO, register,
                                                runResourceT)
+import           Data.Aeson                   (Value, decode')
+import qualified Data.Aeson.Lens              as Lens
 import qualified Data.ByteString.Lazy.Char8   as LazyByteString
+import           Data.Function                ((&))
 import           Data.List                    (find)
 import           Data.Text                    (Text, pack, strip, unpack)
 import           Data.Text.Encoding.Error     (lenientDecode)
 import qualified Data.Text.Lazy               as LazyText
 import qualified Data.Text.Lazy.Encoding      as LazyText
 import           Prelude                      hiding (error, id)
-import           System.Exit                  (ExitCode(..))
+import qualified Prelude
+import           System.Exit                  (ExitCode (..))
 import           System.IO                    (Handle, hClose)
+import           System.IO.Unsafe             (unsafePerformIO)
 import qualified System.Process               as Process
 import           System.Timeout               (timeout)
 
 
 -- | Failing to interact with Docker results in this exception
 -- being thrown.
-data DockerException = DockerException
-  {
-    -- | Exit code of the underlying Docker process.
-    exitCode :: ExitCode
-    -- | Arguments that were passed to Docker.
-  , args     :: [Text]
-    -- | Docker's STDERR output.
-  , stderr   :: Text
-  }
+data DockerException
+  = DockerException
+    {
+      -- | Exit code of the underlying Docker process.
+      exitCode :: ExitCode
+      -- | Arguments that were passed to Docker.
+    , args     :: [Text]
+      -- | Docker's STDERR output.
+    , stderr   :: Text
+    }
+  | InspectUnknownContainerId { id :: ContainerId }
+  | InspectOutputInvalidJSON  { id :: ContainerId }
+  | UnknownPortMapping
+    {
+      -- | Id of the `Container` that we tried to lookup the
+      -- port mapping.
+      id            :: ContainerId
+      -- | Textual representation of port mapping we were
+      -- trying to look up.
+    , containerPort :: Text
+    }
   deriving (Eq, Show)
 
 
@@ -125,7 +147,6 @@ data ContainerRequest = ContainerRequest
   , cmd          :: Maybe [Text]
   , env          :: [(Text, Text)]
   , exposedPorts :: [Int]
-  , publishPorts :: [Text]
   , volumeMounts :: [(Text, Text)]
   , links        :: [ContainerId]
   , name         :: Maybe Text
@@ -143,7 +164,6 @@ containerRequest image = ContainerRequest
   , cmd          = Nothing
   , env          = []
   , exposedPorts = []
-  , publishPorts = []
   , volumeMounts = []
   , links        = []
   , rmOnExit     = True
@@ -183,15 +203,16 @@ setLink newLink req =
 
 
 -- | Set exposed ports on the container.
+--
+-- Example:
+--
+-- @ redis
+--     `&` `setExpose` [ 6379 ]
+-- @
+--
 setExpose :: [Int] -> ContainerRequest -> ContainerRequest
 setExpose newExpose req =
   req { exposedPorts = newExpose }
-
-
--- | Set published ports on the container.
-setPublish :: [Text] -> ContainerRequest -> ContainerRequest
-setPublish newPublish req =
-  req { publishPorts = newPublish }
 
 
 -- | Set the waiting strategy on the container.
@@ -213,7 +234,6 @@ run request = liftResourceT $ do
       , cmd
       , env
       , exposedPorts
-      , publishPorts
       , volumeMounts
       , links
       , rmOnExit
@@ -229,8 +249,7 @@ run request = liftResourceT $ do
       [ [ "--detach" ] ] ++
       [ [ "--name", containerName ] | Just containerName <- [name] ] ++
       [ [ "--env", variable <> "=" <> value  ] | (variable, value) <- env ] ++
-      [ [ "--expose", pack (show port)] | port <- exposedPorts ] ++
-      [ [ "--publish", port ] | port <- publishPorts ] ++
+      [ [ "--publish", pack (show port)] | port <- exposedPorts ] ++
       [ [ "--link", container ] | container <- links ] ++
       [ [ "--volume", src <> ":" <> dest ] | (src, dest) <- volumeMounts ] ++
       [ [ "--rm" ] | rmOnExit ] ++
@@ -245,6 +264,11 @@ run request = liftResourceT $ do
       -- N.B. Force to not leak STDOUT String
       strip (pack stdout)
 
+  let
+    -- Careful, this is really meant to be lazy
+    ~inspectOutput = unsafePerformIO $
+      internalInspect id
+
   container <- mfix $ \container -> do
     -- Note: We have to tie the knot as the resulting container
     -- carries the release key as well.
@@ -254,6 +278,7 @@ run request = liftResourceT $ do
         id
       , releaseKey
       , image
+      , inspectOutput
       }
 
   case readiness of
@@ -268,9 +293,16 @@ run request = liftResourceT $ do
 -- | Internal function that runs Docker. Takes care of throwing an exception
 -- in case of failure.
 docker :: MonadIO m => [Text] -> m String
-docker args = liftIO $ do
+docker args =
+  dockerWithStdin args ""
+
+
+-- | Internal function that runs Docker. Takes care of throwing an exception
+-- in case of failure.
+dockerWithStdin :: MonadIO m => [Text] -> Text -> m String
+dockerWithStdin args stdin = liftIO $ do
   (exitCode, stdout, stderr) <- Process.readProcessWithExitCode "docker"
-    (map unpack args) ""
+    (map unpack args) (unpack stdin)
 
   case exitCode of
     ExitSuccess -> pure stdout
@@ -377,26 +409,30 @@ fromBuildContext
   :: FilePath
   -> Maybe FilePath
   -> ToImage
-fromBuildContext =
-  undefined
-
-
--- | Build an image from a tar stream. Useful if you want to create images dynamically
--- from code.
-fromTarballContext
-  :: LazyByteString.ByteString
-  -> (Maybe FilePath)
-  -> ToImage
-fromTarballContext =
-  undefined
+fromBuildContext path mdockerfile = defaultToImage $ do
+  let
+    args
+      | Just dockerfile <- mdockerfile =
+          [ "build", "-f", pack dockerfile, pack path ]
+      | otherwise =
+          [ "build", pack path ]
+  output <- docker args
+  return $ Image
+    {
+      tag = strip (pack output)
+    }
 
 
 -- | Build a contextless image only from a Dockerfile passed as `Text`.
 fromDockerfile
   :: Text
   -> ToImage
-fromDockerfile =
-  undefined
+fromDockerfile dockerfile = defaultToImage $ do
+  output <- dockerWithStdin [ "build", "--quiet", "-" ] dockerfile
+  return $ Image
+    {
+      tag = strip (pack output)
+    }
 
 
 -- | Identifies a container within the Docker runtime. Assigned by @docker run@.
@@ -544,9 +580,65 @@ data Image = Image
 data Container = Container
   {
     -- | The container Id assigned by Docker, uniquely identifying this `Container`.
-    id         :: ContainerId
+    id            :: ContainerId
     -- | Underlying `ReleaseKey` for the resource finalizer.
-  , releaseKey :: ReleaseKey
+  , releaseKey    :: ReleaseKey
     -- | The underlying `Image` of this container.
-  , image      :: Image
+  , image         :: Image
+    -- | Memoized output of `docker inspect`. This is being calculated lazily.
+  , inspectOutput :: InspectOutput
   }
+
+
+-- | The parsed JSON output of docker inspect command.
+type InspectOutput = Value
+
+
+-- | Looks up an exposed port on the host.
+mappedPort :: Container -> Int -> Int
+mappedPort Container { id, inspectOutput } port =
+  let
+    -- TODO also support UDP ports
+    textPort :: Text
+    textPort = pack (show port) <> "/tcp"
+  in
+    -- TODO be more mindful, make sure to grab the
+    -- port from the right host address
+
+    case inspectOutput
+      ^? Lens.key "NetworkSettings"
+      . Lens.key "Ports"
+      . Lens.key textPort
+      . Lens.values
+      . Lens.key "HostPort"
+      . Lens._String of
+
+      Nothing ->
+        throw $ UnknownPortMapping
+          {
+            id
+          , containerPort = textPort
+          }
+      Just hostPort ->
+        read (unpack hostPort)
+
+
+-- | Runs the `docker inspect` command. Memoizes the result.
+inspect :: MonadDocker m => Container -> m InspectOutput
+inspect Container { inspectOutput } =
+  pure inspectOutput
+
+
+-- | Runs the `docker inspect` command.
+internalInspect :: (MonadThrow m, MonadIO m) => ContainerId -> m InspectOutput
+internalInspect id = do
+  stdout <- docker [ "inspect", id ]
+  case decode' (LazyByteString.pack stdout) of
+    Nothing ->
+      throwM $ InspectOutputInvalidJSON { id }
+    Just [] ->
+      throwM $ InspectUnknownContainerId { id }
+    Just [value] ->
+      pure value
+    Just _ ->
+      Prelude.error "Internal: Multiple results where I expected single result"

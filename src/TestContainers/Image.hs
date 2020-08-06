@@ -13,8 +13,7 @@ module TestContainers.Image
 
 import           TestContainers.Docker as Docker (Image (..), ToImage, build,
                                                   fromBuildContext,
-                                                  fromDockerfile, fromTag,
-                                                  fromTarballContext)
+                                                  fromDockerfile, fromTag)
 
 
 -- | Image for Redis database.

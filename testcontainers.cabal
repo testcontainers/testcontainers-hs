@@ -25,10 +25,13 @@ library
 
   -- other-modules:
   -- other-extensions:
-  build-depends:       base >=4.12 && <5,
+  build-depends:       aeson,
+                       base >=4.12 && <5,
                        bytestring,
                        exceptions,
                        hspec >=2.7.1 && <2.8,
+                       lens,
+                       lens-aeson,
                        process,
                        resourcet,
                        tasty,
