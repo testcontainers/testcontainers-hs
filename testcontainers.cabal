@@ -28,19 +28,19 @@ library
 
   -- other-modules:
   -- other-extensions:
-  build-depends:       aeson,
-                       base >=4.12 && <5,
-                       bytestring,
-                       exceptions,
-                       hspec >=2.7.1 && <2.8,
-                       lens,
-                       lens-aeson,
-                       network,
-                       process,
-                       resourcet,
-                       tasty,
-                       text,
-                       unliftio-core
+  build-depends:       base >=4.12 && <5,
+                       aeson                >= 1.4.6 && < 1.5,
+                       bytestring           >= 0.10.8 && < 0.11,
+                       text                 >= 1.2.3 && < 1.3,
+                       exceptions           >= 0.10.4 && < 0.11,
+                       lens                 >= 4.19.2 && < 5,
+                       process              >= 1.6.5 && < 1.7,
+                       lens-aeson           >= 1.1 && < 1.2,
+                       network              >= 2.8.0 && < 2.9,
+                       resourcet            >= 1.2.4 && < 1.3,
+                       unliftio-core        >= 0.2.0 && < 0.3,
+                       tasty                >= 1.0   && < 1.4
+
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options:         -Wall
@@ -56,7 +56,7 @@ test-suite tests
   build-tool-depends:  hspec-discover:hspec-discover,
                        tasty-discover:tasty-discover
   build-depends:       base,
-                       hspec,
+                       hspec >= 2.0 && < 3.0,
                        tasty,
                        tasty-discover >=4.2.1 && <4.3,
                        tasty-hunit,
