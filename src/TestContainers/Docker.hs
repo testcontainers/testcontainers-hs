@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE ConstraintKinds       #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE PatternSynonyms       #-}
@@ -9,6 +10,13 @@
 module TestContainers.Docker
   (
     MonadDocker
+
+  -- * Configuration
+
+  , Config(..)
+  , defaultDockerConfig
+  , dockerForMacConfig
+  , determineConfig
 
   -- * Docker image
 
@@ -79,6 +87,11 @@ module TestContainers.Docker
   , Pipe(..)
   , waitForLogLine
 
+  -- * Misc. Docker functions
+
+  , dockerVersion
+  , isDockerForDesktop
+
   -- * Wait until a socket is reachable
   , waitUntilMappedPortReachable
 
@@ -97,6 +110,7 @@ import           Control.Monad.Catch          (Exception, MonadCatch, MonadMask,
 import           Control.Monad.Fix            (mfix)
 import           Control.Monad.IO.Class       (MonadIO (liftIO))
 import           Control.Monad.IO.Unlift      (MonadUnliftIO (withRunInIO))
+import           Control.Monad.Reader         (MonadReader (..), runReaderT)
 import           Control.Monad.Trans.Resource (MonadResource (liftResourceT),
                                                ReleaseKey, ResIO, register,
                                                runResourceT)
@@ -105,11 +119,13 @@ import qualified Data.Aeson.Lens              as Lens
 import qualified Data.ByteString.Lazy.Char8   as LazyByteString
 import           Data.Function                ((&))
 import           Data.List                    (find)
-import           Data.Text                    (Text, pack, strip, unpack)
+import           Data.Text                    (Text, isInfixOf, pack, strip,
+                                               unpack)
 import           Data.Text.Encoding.Error     (lenientDecode)
 import qualified Data.Text.Lazy               as LazyText
 import qualified Data.Text.Lazy.Encoding      as LazyText
-import           GHC.Stack                    (HasCallStack, withFrozenCallStack)
+import           GHC.Stack                    (HasCallStack,
+                                               withFrozenCallStack)
 import qualified Network.Socket               as Socket
 import           Prelude                      hiding (error, id)
 import qualified Prelude
@@ -120,8 +136,64 @@ import qualified System.Process               as Process
 import           System.Timeout               (timeout)
 
 
+-- | Configuration for defaulting behavior.
+--
+-- Note that IP address returned by `containerIp` is not reachable when using
+-- Docker For Mac (See https://docs.docker.com/docker-for-mac/networking/#per-container-ip-addressing-is-not-possible).
+--
+-- If you are targeting Docker For Mac you should use `dockerForMacConfig`, instead
+-- use `defaultDockerConfig`.
+--
+-- @since 0.2.0.0
+--
+data Config = Config
+  {
+    -- | How to retrieve the IP address of a Docker container.
+    -- There some known limitations around Docker for Mac in that
+    -- it doesn't support accessing containers by their IP (see `containerIp`).
+    --
+    -- This configuration let's you define how to access the IP.
+    configContainerIp :: Container -> Text
+  }
+
+
+-- | Default configuration.
+--
+-- @since 0.2.0.0
+--
+defaultDockerConfig :: Config
+defaultDockerConfig = Config
+  {
+    configContainerIp = internalContainerIp
+  }
+
+
+-- | A default configuration to use with Docker for Mac installations. It doesn't
+-- use a Docker container's IP address to access a container, instead it always uses
+-- the loopback interface @0.0.0.0@.
+--
+-- @since 0.2.0.0
+--
+dockerForMacConfig :: Config
+dockerForMacConfig = defaultDockerConfig
+  {
+    configContainerIp = \_ -> "0.0.0.0"
+  }
+
+
+-- | Autoselect the default configuration depending on wether you use Docker For
+-- Mac/Desktop or not.
+determineConfig :: IO Config
+determineConfig = do
+  dockerForDesktop <- runResourceT $ isDockerForDesktop
+  pure $ if dockerForDesktop then dockerForMacConfig else defaultDockerConfig
+
+
 -- | Failing to interact with Docker results in this exception
 -- being thrown.
+--
+-- @since 0.1.0.0
+--
 data DockerException
   = DockerException
     {
@@ -139,7 +211,7 @@ data DockerException
     {
       -- | Id of the `Container` that we tried to lookup the
       -- port mapping.
-      id            :: ContainerId
+      id   :: ContainerId
       -- | Textual representation of port mapping we were
       -- trying to look up.
     , port :: Text
@@ -151,11 +223,17 @@ instance Exception DockerException
 
 
 -- | Docker related functionality is parameterized over this `Monad`.
+--
+-- @since 0.1.0.0
+--
 type MonadDocker m =
-  (MonadIO m, MonadMask m, MonadThrow m, MonadCatch m, MonadResource m)
+  (MonadIO m, MonadMask m, MonadThrow m, MonadCatch m, MonadResource m, MonadReader Config m)
 
 
 -- | Parameters for a running a Docker container.
+--
+-- @since 0.1.0.0
+--
 data ContainerRequest = ContainerRequest
   {
     toImage      :: ToImage
@@ -171,6 +249,9 @@ data ContainerRequest = ContainerRequest
 
 
 -- | Default `ContainerRequest`. Used as base for every Docker container.
+--
+-- @since 0.1.0.0
+--
 containerRequest :: ToImage -> ContainerRequest
 containerRequest image = ContainerRequest
   {
@@ -186,51 +267,80 @@ containerRequest image = ContainerRequest
   }
 
 
--- | Set the name of a Docker container.
+-- | Set the name of a Docker container. This is equivalent to invoking @docker run@
+-- with the @--name@ parameter.
+--
+-- @since 0.1.0.0
+--
 setName :: Text -> ContainerRequest -> ContainerRequest
 setName newName req =
   -- TODO error on empty Text
   req { name = Just newName }
 
 
--- | The command to execute inside the Docker container.
+-- | The command to execute inside the Docker container. This is the equivalent
+-- of passing the command on the @docker run@ invocation.
+--
+-- @since 0.1.0.0
+--
 setCmd :: [Text] -> ContainerRequest -> ContainerRequest
 setCmd newCmd req =
   req { cmd = Just newCmd }
 
 
--- | Wether to remove the container once exited.
+-- | Wether to remove the container once exited. This is equivalent to passing
+-- @--rm@ to @docker run@. (default is `True`).
+--
+-- @since 0.1.0.0
+--
 setRm :: Bool -> ContainerRequest -> ContainerRequest
 setRm newRm req =
   req { rmOnExit = newRm }
 
 
--- | Set the environment for the container.
+-- | Set the environment for the container. This is equivalent to passing @--env key=value@
+-- to @docker run@.
+--
+-- @since 0.1.0.0
+--
 setEnv :: [(Text, Text)] -> ContainerRequest -> ContainerRequest
 setEnv newEnv req =
   req { env = newEnv }
 
 
--- | Set link on the container.
+-- | Set link on the container. This is equivalent to passing @--link other_container@
+-- to @docker run@.
+--
+-- @since 0.1.0.0
+--
 setLink :: [ContainerId] -> ContainerRequest -> ContainerRequest
 setLink newLink req =
   req { links = newLink }
 
 
--- | Set exposed ports on the container.
+-- | Set exposed ports on the container. This is equivalent to setting @--publish $PORT@ to
+-- @docker run@. Docker assigns a random port for the host port. You will have to use `containerIp`
+-- and `containerPort` to connect to the published port.
 --
--- Example:
---
--- @ redis
---     `&` `setExpose` [ 6379 ]
 -- @
+--   container <- `run` $ `containerRequest` `redis` & `setExpose` [ 6379 ]
+--   let (redisHost, redisPort) = (`containerIp` container, `containerPort` container 6379)
+--   print (redisHost, redisPort)
+-- @
+--
+-- @since 0.1.0.0
 --
 setExpose :: [Int] -> ContainerRequest -> ContainerRequest
 setExpose newExpose req =
   req { exposedPorts = newExpose }
 
 
--- | Set the waiting strategy on the container.
+-- | Set the waiting strategy on the container. Depending on a Docker container
+-- it can take some time until the provided service is ready. You will want to
+-- use to `setWaitingFor` to block until the container is ready to use.
+--
+-- @since 0.1.0.0
+--
 setWaitingFor :: WaitUntilReady -> ContainerRequest -> ContainerRequest
 setWaitingFor newWaitingFor req =
   req { readiness = Just newWaitingFor }
@@ -238,8 +348,12 @@ setWaitingFor newWaitingFor req =
 
 -- | Runs a Docker container from an `Image` and `ContainerRequest`. A finalizer
 -- is registered so that the container is aways stopped when it goes out of scope.
+-- This function is essentially @docker run@.
+--
+-- @since 0.1.0.0
+--
 run :: MonadDocker m => ContainerRequest -> m Container
-run request = liftResourceT $ do
+run request = do
 
   let
     ContainerRequest
@@ -279,22 +393,23 @@ run request = liftResourceT $ do
       -- N.B. Force to not leak STDOUT String
       strip (pack stdout)
 
-  let
     -- Careful, this is really meant to be lazy
     ~inspectOutput = unsafePerformIO $
       internalInspect id
 
-  container <- mfix $ \container -> do
-    -- Note: We have to tie the knot as the resulting container
-    -- carries the release key as well.
-    releaseKey <- register $ runResourceT (stop container)
-    pure $ Container
-      {
-        id
-      , releaseKey
-      , image
-      , inspectOutput
-      }
+  config <- ask
+  container <- liftResourceT $ mfix $ \container -> do
+      -- Note: We have to tie the knot as the resulting container
+      -- carries the release key as well.
+      releaseKey <- register $ runReaderT (runResourceT (stop container)) config
+      pure $ Container
+        {
+          id
+        , releaseKey
+        , image
+        , inspectOutput
+        , config
+        }
 
   case readiness of
     Just wait ->
@@ -307,6 +422,9 @@ run request = liftResourceT $ do
 
 -- | Internal function that runs Docker. Takes care of throwing an exception
 -- in case of failure.
+--
+-- @since 0.1.0.0
+--
 docker :: MonadIO m => [Text] -> m String
 docker args =
   dockerWithStdin args ""
@@ -314,6 +432,9 @@ docker args =
 
 -- | Internal function that runs Docker. Takes care of throwing an exception
 -- in case of failure.
+--
+-- @since 0.1.0.0
+--
 dockerWithStdin :: MonadIO m => [Text] -> Text -> m String
 dockerWithStdin args stdin = liftIO $ do
   (exitCode, stdout, stderr) <- Process.readProcessWithExitCode "docker"
@@ -328,28 +449,41 @@ dockerWithStdin args stdin = liftIO $ do
       }
 
 
--- | Kills a Docker container.
+-- | Kills a Docker container. `kill` is essentially @docker kill@.
+--
+-- @since 0.1.0.0
+--
 kill :: MonadDocker m => Container -> m ()
 kill Container { id } = do
   _ <- docker [ "kill", id ]
   return ()
 
 
--- | Stops a Docker container.
+-- | Stops a Docker container. `stop` is essentially @docker stop@.
+--
+-- @since 0.1.0.0
+--
 stop :: MonadDocker m => Container -> m ()
 stop Container { id } = do
   _ <- docker [ "stop", id ]
   return ()
 
 
--- | Remove a Docker container.
+-- | Remove a Docker container. `rm` is essentially @docker rm -f@
+--
+-- @since 0.1.0.0
+--
 rm :: MonadDocker m => Container -> m ()
 rm Container { id } = do
   _ <- docker [ "rm", "-f", "-v", id ]
   return ()
 
 
--- | Get the logs from a Docker container.
+-- | Access STDOUT and STDERR of a running Docker container. This is essentially
+-- @docker logs@ under the hood.
+--
+-- @since 0.1.0.0
+--
 withLogs :: forall m a . MonadDocker m => Container -> (Handle -> Handle -> m a) -> m a
 withLogs Container { id } logger = do
 
@@ -374,10 +508,16 @@ withLogs Container { id } logger = do
 
 
 -- | A tag to a Docker image.
+--
+-- @since 0.1.0.0
+--
 type ImageTag = Text
 
 
 -- | A description of how to build an `Image`.
+--
+-- @since 0.1.0.0
+--
 data ToImage = ToImage
   {
     runToImage              :: forall m. MonadDocker m => m Image
@@ -389,6 +529,9 @@ data ToImage = ToImage
 -- image is expensive (e.g. a call to `fromBuildContext`) we don't want to
 -- repeatedly build the image. Instead, `build` can be used to execute the
 -- underlying Docker build once and re-use the resulting `Image`.
+--
+-- @since 0.1.0.0
+--
 build :: MonadDocker m => ToImage -> m ToImage
 build toImage@ToImage { applyToContainerRequest } = do
   image <- runToImage toImage
@@ -400,6 +543,9 @@ build toImage@ToImage { applyToContainerRequest } = do
 
 
 -- | Default `ToImage`. Doesn't apply anything to to `ContainerRequests`.
+--
+-- @since 0.1.0.0
+--
 defaultToImage :: (forall m . MonadDocker m => m Image) -> ToImage
 defaultToImage action = ToImage
   {
@@ -409,9 +555,12 @@ defaultToImage action = ToImage
 
 
 -- | Get an `Image` from a tag.
+--
+-- @since 0.1.0.0
+--
 fromTag :: ImageTag -> ToImage
-fromTag imageTag = defaultToImage $ do
-  output <- docker [ "pull", "--quiet", imageTag ]
+fromTag tag = defaultToImage $ do
+  output <- docker [ "pull", "--quiet", tag ]
   return $ Image
     {
       tag = strip (pack output)
@@ -420,6 +569,9 @@ fromTag imageTag = defaultToImage $ do
 
 -- | Build the image from a build path and an optional path to the
 -- Dockerfile (default is Dockerfile)
+--
+-- @since 0.1.0.0
+--
 fromBuildContext
   :: FilePath
   -> Maybe FilePath
@@ -439,6 +591,9 @@ fromBuildContext path mdockerfile = defaultToImage $ do
 
 
 -- | Build a contextless image only from a Dockerfile passed as `Text`.
+--
+-- @since 0.1.0.0
+--
 fromDockerfile
   :: Text
   -> ToImage
@@ -451,10 +606,16 @@ fromDockerfile dockerfile = defaultToImage $ do
 
 
 -- | Identifies a container within the Docker runtime. Assigned by @docker run@.
+--
+-- @since 0.1.0.0
+--
 type ContainerId = Text
 
 
 -- | Dumb logger abstraction to allow us to trace container execution.
+--
+-- @since 0.1.0.0
+--
 data Logger = Logger
   {
     debug :: forall m . (HasCallStack, MonadIO m) => Text -> m ()
@@ -465,6 +626,9 @@ data Logger = Logger
 
 
 -- | Logger that doesn't log anything.
+--
+-- @since 0.1.0.0
+--
 silentLogger :: Logger
 silentLogger = Logger
   {
@@ -477,14 +641,20 @@ silentLogger = Logger
 
 -- | A strategy that describes how to asses readiness of a `Container`. Allows
 -- Users to plug in their definition of readiness.
+--
+-- @since 0.1.0.0
+--
 newtype WaitUntilReady = WaitUntilReady
   {
-    checkContainerReady :: Logger -> Container -> ResIO ()
+    checkContainerReady :: Logger -> Config -> Container -> ResIO ()
   }
 
 
 -- | The exception thrown by `waitForLine` in case the expected log line
 -- wasn't found.
+--
+-- @since 0.1.0.0
+--
 newtype UnexpectedEndOfPipe = UnexpectedEndOfPipe
   {
     -- | The id of the underlying container.
@@ -497,6 +667,9 @@ instance Exception UnexpectedEndOfPipe
 
 
 -- | The exception thrown by `waitUntilTimeout`.
+--
+-- @since 0.1.0.0
+--
 newtype TimeoutException = TimeoutException
   {
     -- | The id of the underlying container that was not ready in time.
@@ -511,11 +684,14 @@ instance Exception TimeoutException
 -- | @waitUntilTimeout n waitUntilReady@ waits @n@ seconds for the container
 -- to be ready. If the container is not ready by then a `TimeoutException` will
 -- be thrown.
+--
+-- @since 0.1.0.0
+--
 waitUntilTimeout :: Int -> WaitUntilReady -> WaitUntilReady
-waitUntilTimeout seconds wait = WaitUntilReady $ \logger container@Container{ id } -> do
+waitUntilTimeout seconds wait = WaitUntilReady $ \logger config container@Container{ id } -> do
   withRunInIO $ \runInIO -> do
     result <- timeout (seconds * 1000000) $
-      runInIO (checkContainerReady wait logger container)
+      runInIO (checkContainerReady wait logger config container)
     case result of
       Nothing ->
         throwM $ TimeoutException { id }
@@ -525,10 +701,13 @@ waitUntilTimeout seconds wait = WaitUntilReady $ \logger container@Container{ id
 
 -- | Waits until the port of a container is ready to accept connections.
 -- This combinator should always be used with `waitUntilTimeout`.
+--
+-- @since 0.1.0.0
+--
 waitUntilMappedPortReachable
   :: Int
   -> WaitUntilReady
-waitUntilMappedPortReachable port = WaitUntilReady $ \logger container ->
+waitUntilMappedPortReachable port = WaitUntilReady $ \logger _config container ->
   withFrozenCallStack $ do
 
   let
@@ -575,13 +754,19 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \logger container ->
 --
 -- The `Handle`s passed to the function argument represent @stdout@ and @stderr@
 -- of the container.
+--
+-- @since 0.1.0.0
+--
 waitWithLogs :: (Container -> Handle -> Handle -> IO ()) -> WaitUntilReady
-waitWithLogs waiter = WaitUntilReady $ \_logger container -> do
-  withLogs container $ \stdout stderr ->
+waitWithLogs waiter = WaitUntilReady $ \_logger config container -> do
+  flip runReaderT config $ withLogs container $ \stdout stderr ->
     liftIO $ waiter container stdout stderr
 
 
 -- | A data type indicating which pipe to scan for a specific log line.
+--
+-- @since 0.1.0.0
+--
 data Pipe
   -- | Refer to logs on STDOUT.
   = Stdout
@@ -598,6 +783,9 @@ data Pipe
 -- @
 -- wairForLogLine Stdout ("Ready to accept connections" ``LazyText.isInfixOf``)
 -- @
+--
+-- @since 0.1.0.0
+--
 waitForLogLine :: Pipe -> (LazyText.Text -> Bool) -> WaitUntilReady
 waitForLogLine whereToLook matches = waitWithLogs $ \Container { id } stdout stderr -> do
   let
@@ -623,12 +811,19 @@ waitForLogLine whereToLook matches = waitWithLogs $ \Container { id } stdout std
 
 -- | Blocks until the container is ready. `waitUntilReady` might throw exceptions
 -- depending on the used `WaitUntilReady` on the container.
+--
+-- @since 0.1.0.0
+--
 waitUntilReady :: MonadDocker m => Container -> WaitUntilReady -> m ()
-waitUntilReady container waiter =
-  liftResourceT $ checkContainerReady waiter silentLogger container
+waitUntilReady container waiter = do
+  config <- ask
+  liftResourceT $ checkContainerReady waiter silentLogger config container
 
 
 -- | Handle to a Docker image.
+--
+-- @since 0.1.0.0
+--
 data Image = Image
   {
     -- | The image tag assigned by Docker. Uniquely identifies an `Image`
@@ -640,11 +835,17 @@ data Image = Image
 
 -- | The image tag assigned by Docker. Uniquely identifies an `Image`
 -- within Docker.
+--
+-- @since 0.1.0.0
+--
 imageTag :: Image -> ImageTag
 imageTag Image { tag } = tag
 
 
 -- | Handle to a Docker container.
+--
+-- @since 0.1.0.0
+--
 data Container = Container
   {
     -- | The container Id assigned by Docker, uniquely identifying this `Container`.
@@ -653,21 +854,32 @@ data Container = Container
   , releaseKey    :: ReleaseKey
     -- | The underlying `Image` of this container.
   , image         :: Image
+    -- | Configuration used to create and run this container.
+  , config        :: Config
     -- | Memoized output of `docker inspect`. This is being calculated lazily.
   , inspectOutput :: InspectOutput
   }
 
 
 -- | The parsed JSON output of docker inspect command.
+--
+-- @since 0.1.0.0
+--
 type InspectOutput = Value
 
 
 -- | Returns the id of the container.
+--
+-- @since 0.1.0.0
+--
 containerId :: Container -> ContainerId
 containerId Container { id } = id
 
 
 -- | Returns the underlying image of the container.
+--
+-- @since 0.1.0.0
+--
 containerImage :: Container -> Image
 containerImage Container { image } = image
 
@@ -675,13 +887,25 @@ containerImage Container { image } = image
 -- | Returns the internal release key used for safely shutting down
 -- the container. Use this with care. This function is considered
 -- an internal detail.
+--
+-- @since 0.1.0.0
+--
 containerReleaseKey :: Container -> ReleaseKey
 containerReleaseKey Container { releaseKey } = releaseKey
 
 
 -- | Looks up the ip address of the container.
+--
+-- @since 0.1.0.0
+--
 containerIp :: Container -> Text
-containerIp Container { id, inspectOutput } =
+containerIp container@Container { config = Config { configContainerIp } } =
+  configContainerIp container
+
+
+-- | Get the IP address of a running Docker container using @docker inspect@.
+internalContainerIp :: Container -> Text
+internalContainerIp Container { id, inspectOutput } =
   case inspectOutput
     ^? Lens.key "NetworkSettings"
     . Lens.key "IPAddress"
@@ -695,6 +919,9 @@ containerIp Container { id, inspectOutput } =
 
 
 -- | Looks up an exposed port on the host.
+--
+-- @since 0.1.0.0
+--
 containerPort :: Container -> Int -> Int
 containerPort Container { id, inspectOutput } port =
   let
@@ -724,12 +951,18 @@ containerPort Container { id, inspectOutput } port =
 
 
 -- | Runs the `docker inspect` command. Memoizes the result.
+--
+-- @since 0.1.0.0
+--
 inspect :: MonadDocker m => Container -> m InspectOutput
 inspect Container { inspectOutput } =
   pure inspectOutput
 
 
 -- | Runs the `docker inspect` command.
+--
+-- @since 0.1.0.0
+--
 internalInspect :: (MonadThrow m, MonadIO m) => ContainerId -> m InspectOutput
 internalInspect id = do
   stdout <- docker [ "inspect", id ]
@@ -742,3 +975,15 @@ internalInspect id = do
       pure value
     Just _ ->
       Prelude.error "Internal: Multiple results where I expected single result"
+
+
+dockerVersion :: (MonadResource m, MonadMask m, MonadIO m) => m Text
+dockerVersion = do
+  stdout <- docker [ "version", "--format", "{{.Server.KernelVersion}}" ]
+  return (pack stdout)
+
+
+isDockerForDesktop :: (MonadResource m, MonadMask m, MonadIO m) => m Bool
+isDockerForDesktop = do
+  version <- dockerVersion
+  pure $ "linuxkit" `isInfixOf` version

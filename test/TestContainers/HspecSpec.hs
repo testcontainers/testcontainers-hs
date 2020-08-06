@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module TestContainers.HspecSpec(main, spec_all) where
 
 import           Test.Hspec

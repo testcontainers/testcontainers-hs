@@ -21,6 +21,9 @@ import           TestContainers.Docker as Docker (Image, ToImage, build,
 -- @
 -- redis = fromTag "redis:5.0"
 -- @
+--
+-- @since 0.1.0.0
+--
 redis :: ToImage
 redis =
   fromTag "redis:5.0"
@@ -31,6 +34,9 @@ redis =
 -- @
 -- mongo = Tag "mongo:4.0.17"
 -- @
+--
+-- @since 0.1.0.0
+--
 mongo :: ToImage
 mongo =
   fromTag "mongo:4.0.17"

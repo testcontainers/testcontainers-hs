@@ -1,13 +1,17 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
 module TestContainers.TastySpec(main, test_all) where
 
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Text              (unpack)
+import           Data.Text.Lazy         (isInfixOf)
 import           Test.Tasty
 import           Test.Tasty.HUnit
-import           TestContainers.Tasty   (MonadDocker, containerIp,
-                                         containerPort, containerRequest, redis,
-                                         run, setExpose, setWaitingFor,
+import           TestContainers.Tasty   (MonadDocker, Pipe (Stderr, Stdout),
+                                         containerIp, containerPort,
+                                         containerRequest, fromTag, redis, run,
+                                         setExpose, setRm, setWaitingFor,
+                                         waitForLogLine,
                                          waitUntilMappedPortReachable,
                                          waitUntilTimeout, withContainers, (&))
 
@@ -20,8 +24,9 @@ containers1 = do
     & setWaitingFor (waitUntilTimeout 30 $
                       waitUntilMappedPortReachable 6379)
 
-  liftIO $
-    print $ unpack (containerIp redisContainer) <> ":" <> show (containerPort redisContainer 6379)
+  _rabbitmq <- run $ containerRequest (fromTag "rabbitmq:3.8.4")
+    & setRm False
+    & setWaitingFor (waitForLogLine Stdout (("completed with" `isInfixOf`)))
 
   pure ()
 

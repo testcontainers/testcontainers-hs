@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module TestContainers.Tasty
@@ -10,6 +11,7 @@ module TestContainers.Tasty
   ) where
 
 import           Control.Monad.IO.Class                (liftIO)
+import           Control.Monad.Reader                  (runReaderT)
 import           Control.Monad.Trans.Resource          (InternalState,
                                                         getInternalState,
                                                         runResourceT)
@@ -21,7 +23,7 @@ import           Test.Tasty                            (TestTree, withResource)
 import           TestContainers                        (Container,
                                                         ContainerRequest,
                                                         MonadDocker, ToImage,
-                                                        run, stop)
+                                                        stop)
 import           TestContainers                        as Reexports
 
 
@@ -58,13 +60,17 @@ withContainers
   -> TestTree
 withContainers startContainers tests =
   let
+    runC action = do
+      config <- determineConfig
+      runReaderT (runResourceT action) config
+
     -- Correct resource handling is tricky here:
     -- Tasty offers a bracket alike in IO. We  have
     -- to transfer the ReleaseMap of the ResIO safely
     -- to the release function. Fortunately resourcet
     -- let's us access the internal state..
     acquire :: IO (a, InternalState)
-    acquire = runResourceT $ do
+    acquire = runC $ do
       result     <- startContainers
       releaseMap <- getInternalState
 

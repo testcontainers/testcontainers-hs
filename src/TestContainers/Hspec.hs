@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module TestContainers.Hspec
@@ -11,6 +12,7 @@ module TestContainers.Hspec
 
 import           Control.Exception                     (bracket)
 import           Control.Monad.IO.Class                (liftIO)
+import           Control.Monad.Reader                  (runReaderT)
 import           Control.Monad.Trans.Resource          (InternalState,
                                                         getInternalState)
 import           Control.Monad.Trans.Resource.Internal (stateAlloc,
@@ -46,13 +48,17 @@ withContainers
   -> IO ()
 withContainers startContainers = dropState $ bracket acquire release
   where
-    acquire :: IO (a, InternalState)
-    acquire = runResourceT $ do
-      result     <- startContainers
-      releaseMap <- getInternalState
+    runC action = do
+      config <- determineConfig
+      runReaderT (runResourceT action) config
 
-      liftIO $ stateAlloc releaseMap
-      pure (result, releaseMap)
+    acquire :: IO (a, InternalState)
+    acquire = runC $ do
+        result     <- startContainers
+        releaseMap <- getInternalState
+
+        liftIO $ stateAlloc releaseMap
+        pure (result, releaseMap)
 
     release :: (a, InternalState) -> IO ()
     release (_, internalState) =
