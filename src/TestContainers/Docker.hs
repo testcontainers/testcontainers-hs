@@ -49,6 +49,7 @@ module TestContainers.Docker
 
   -- * Managing the container lifecycle
 
+  , ip
   , mappedPort
 
   , inspect
@@ -126,6 +127,7 @@ data DockerException
     }
   | InspectUnknownContainerId { id :: ContainerId }
   | InspectOutputInvalidJSON  { id :: ContainerId }
+  | InspectOutputUnexpected   { id :: ContainerId }
   | UnknownPortMapping
     {
       -- | Id of the `Container` that we tried to lookup the
@@ -523,9 +525,8 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \logger container ->
   withFrozenCallStack $ do
 
   let
-    -- TODO read host from contaer too
     hostIp :: String
-    hostIp = "0.0.0.0"
+    hostIp = unpack (ip container)
 
     hostPort :: String
     hostPort = show $ mappedPort container port
@@ -646,6 +647,21 @@ data Container = Container
 
 -- | The parsed JSON output of docker inspect command.
 type InspectOutput = Value
+
+
+-- | Looks up the ip address of the container.
+ip :: Container -> Text
+ip Container { id, inspectOutput } =
+  case inspectOutput
+    ^? Lens.key "NetworkSettings"
+    . Lens.key "IPAddress"
+    . Lens._String of
+
+    Nothing ->
+      throw $ InspectOutputUnexpected { id }
+
+    Just address ->
+      address
 
 
 -- | Looks up an exposed port on the host.

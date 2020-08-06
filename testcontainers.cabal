@@ -57,5 +57,6 @@ test-suite tests
                        tasty,
                        tasty-discover >=4.2.1 && <4.3,
                        tasty-hunit,
-                       tasty-hspec,
-                       testcontainers
+                       tasty-hspec,                       
+                       testcontainers,
+                       text
