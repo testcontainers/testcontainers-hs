@@ -358,7 +358,7 @@ withLogs Container { id } logger = do
     acquire =
       liftIO $ Process.runInteractiveProcess
         "docker"
-        [ "logs", unpack id ]
+        [ "logs", "--follow", unpack id ]
         Nothing
         Nothing
 
