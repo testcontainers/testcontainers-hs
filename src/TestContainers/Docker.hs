@@ -13,12 +13,20 @@ module TestContainers.Docker
   -- * Docker image
 
   , ImageTag
-  , Image(Image, tag)
+
+  , Image
+  , imageTag
 
   -- * Docker container
 
   , ContainerId
-  , Container(Container, id, releaseKey, image)
+  , Container
+
+  , containerId
+  , containerImage
+  , containerIp
+  , containerPort
+  , containerReleaseKey
 
   -- * Referring to images
 
@@ -49,10 +57,9 @@ module TestContainers.Docker
 
   -- * Managing the container lifecycle
 
-  , ip
-  , mappedPort
-
+  , InspectOutput
   , inspect
+
   , stop
   , kill
   , rm
@@ -135,7 +142,7 @@ data DockerException
       id            :: ContainerId
       -- | Textual representation of port mapping we were
       -- trying to look up.
-    , containerPort :: Text
+    , port :: Text
     }
   deriving (Eq, Show)
 
@@ -526,10 +533,10 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \logger container ->
 
   let
     hostIp :: String
-    hostIp = unpack (ip container)
+    hostIp = unpack (containerIp container)
 
     hostPort :: String
-    hostPort = show $ mappedPort container port
+    hostPort = show $ containerPort container port
 
     resolve = do
       let hints = Socket.defaultHints { Socket.addrSocketType = Socket.Stream }
@@ -631,6 +638,12 @@ data Image = Image
   deriving (Eq, Show)
 
 
+-- | The image tag assigned by Docker. Uniquely identifies an `Image`
+-- within Docker.
+imageTag :: Image -> ImageTag
+imageTag Image { tag } = tag
+
+
 -- | Handle to a Docker container.
 data Container = Container
   {
@@ -649,9 +662,26 @@ data Container = Container
 type InspectOutput = Value
 
 
+-- | Returns the id of the container.
+containerId :: Container -> ContainerId
+containerId Container { id } = id
+
+
+-- | Returns the underlying image of the container.
+containerImage :: Container -> Image
+containerImage Container { image } = image
+
+
+-- | Returns the internal release key used for safely shutting down
+-- the container. Use this with care. This function is considered
+-- an internal detail.
+containerReleaseKey :: Container -> ReleaseKey
+containerReleaseKey Container { releaseKey } = releaseKey
+
+
 -- | Looks up the ip address of the container.
-ip :: Container -> Text
-ip Container { id, inspectOutput } =
+containerIp :: Container -> Text
+containerIp Container { id, inspectOutput } =
   case inspectOutput
     ^? Lens.key "NetworkSettings"
     . Lens.key "IPAddress"
@@ -665,8 +695,8 @@ ip Container { id, inspectOutput } =
 
 
 -- | Looks up an exposed port on the host.
-mappedPort :: Container -> Int -> Int
-mappedPort Container { id, inspectOutput } port =
+containerPort :: Container -> Int -> Int
+containerPort Container { id, inspectOutput } port =
   let
     -- TODO also support UDP ports
     textPort :: Text
@@ -687,7 +717,7 @@ mappedPort Container { id, inspectOutput } port =
         throw $ UnknownPortMapping
           {
             id
-          , containerPort = textPort
+          , port = textPort
           }
       Just hostPort ->
         read (unpack hostPort)

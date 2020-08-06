@@ -5,9 +5,9 @@ import           Control.Monad.IO.Class (liftIO)
 import           Data.Text              (unpack)
 import           Test.Tasty
 import           Test.Tasty.HUnit
-import           TestContainers.Tasty   (MonadDocker, containerRequest, ip,
-                                         mappedPort, redis, run, setExpose,
-                                         setWaitingFor,
+import           TestContainers.Tasty   (MonadDocker, containerIp,
+                                         containerPort, containerRequest, redis,
+                                         run, setExpose, setWaitingFor,
                                          waitUntilMappedPortReachable,
                                          waitUntilTimeout, withContainers, (&))
 
@@ -21,7 +21,7 @@ containers1 = do
                       waitUntilMappedPortReachable 6379)
 
   liftIO $
-    print $ unpack (ip redisContainer) <> ":" <> show (mappedPort redisContainer 6379)
+    print $ unpack (containerIp redisContainer) <> ":" <> show (containerPort redisContainer 6379)
 
   pure ()
 

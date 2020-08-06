@@ -11,7 +11,7 @@ module TestContainers.Image
 
   ) where
 
-import           TestContainers.Docker as Docker (Image (..), ToImage, build,
+import           TestContainers.Docker as Docker (Image, ToImage, build,
                                                   fromBuildContext,
                                                   fromDockerfile, fromTag)
 
