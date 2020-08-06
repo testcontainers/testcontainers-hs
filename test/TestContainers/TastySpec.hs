@@ -1,28 +1,21 @@
 {-# LANGUAGE OverloadedStrings #-}
 module TestContainers.TastySpec(main, test_all) where
 
-import           Control.Monad.IO.Class (liftIO)
 import           Test.Tasty
 import           Test.Tasty.HUnit
-import           TestContainers.Tasty   (MonadDocker, containerRequest, inspect,
-                                         mappedPort, redis, run, setExpose,
-                                         setWaitingFor,
-                                         waitUntilMappedPortReachable,
-                                         withContainers, (&))
+import           TestContainers.Tasty (MonadDocker, containerRequest, redis,
+                                       run, setExpose, setWaitingFor,
+                                       waitUntilMappedPortReachable,
+                                       waitUntilTimeout, withContainers, (&))
 
 
 containers1
   :: MonadDocker m => m ()
 containers1 = do
-  redisContainer <- run $ containerRequest redis
+  _redisContainer <- run $ containerRequest redis
     & setExpose [ 6379 ]
-    & setWaitingFor (waitUntilMappedPortReachable 6379)
-
-  liftIO $ print $ mappedPort redisContainer 6379
-
-  value <- inspect redisContainer
-  liftIO $ print value
-
+    & setWaitingFor (waitUntilTimeout 30 $
+                      waitUntilMappedPortReachable 6379)
   pure ()
 
 

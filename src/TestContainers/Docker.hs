@@ -499,13 +499,13 @@ newtype TimeoutException = TimeoutException
 instance Exception TimeoutException
 
 
--- | @waitUntilTimeout n waitUntilReady@ waits @n@ microseconds for the container
+-- | @waitUntilTimeout n waitUntilReady@ waits @n@ seconds for the container
 -- to be ready. If the container is not ready by then a `TimeoutException` will
 -- be thrown.
 waitUntilTimeout :: Int -> WaitUntilReady -> WaitUntilReady
-waitUntilTimeout microseconds wait = WaitUntilReady $ \logger container@Container{ id } -> do
+waitUntilTimeout seconds wait = WaitUntilReady $ \logger container@Container{ id } -> do
   withRunInIO $ \runInIO -> do
-    result <- timeout microseconds $
+    result <- timeout (seconds * 1000000) $
       runInIO (checkContainerReady wait logger container)
     case result of
       Nothing ->
