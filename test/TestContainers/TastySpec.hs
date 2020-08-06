@@ -5,8 +5,10 @@ import           Control.Monad.IO.Class (liftIO)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 import           TestContainers.Tasty   (MonadDocker, containerRequest, inspect,
-                                         redis, run, setExpose, withContainers,
-                                         (&), mappedPort)
+                                         mappedPort, redis, run, setExpose,
+                                         setWaitingFor,
+                                         waitUntilMappedPortReachable,
+                                         withContainers, (&))
 
 
 containers1
@@ -14,6 +16,7 @@ containers1
 containers1 = do
   redisContainer <- run $ containerRequest redis
     & setExpose [ 6379 ]
+    & setWaitingFor (waitUntilMappedPortReachable 6379)
 
   liftIO $ print $ mappedPort redisContainer 6379
 

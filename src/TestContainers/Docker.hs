@@ -71,6 +71,9 @@ module TestContainers.Docker
   , Pipe(..)
   , waitForLogLine
 
+  -- * Wait until a socket is reachable
+  , waitUntilMappedPortReachable
+
   -- * Reexports for convenience
   , ResIO
   , runResourceT
@@ -78,10 +81,11 @@ module TestContainers.Docker
   , (&)
   ) where
 
-import           Control.Exception            (throw)
+import           Control.Concurrent           (threadDelay)
+import           Control.Exception            (IOException, throw)
 import           Control.Lens                 ((^?))
 import           Control.Monad.Catch          (Exception, MonadCatch, MonadMask,
-                                               MonadThrow, bracket, throwM)
+                                               MonadThrow, bracket, throwM, try)
 import           Control.Monad.Fix            (mfix)
 import           Control.Monad.IO.Class       (MonadIO (liftIO))
 import           Control.Monad.IO.Unlift      (MonadUnliftIO (withRunInIO))
@@ -97,6 +101,8 @@ import           Data.Text                    (Text, pack, strip, unpack)
 import           Data.Text.Encoding.Error     (lenientDecode)
 import qualified Data.Text.Lazy               as LazyText
 import qualified Data.Text.Lazy.Encoding      as LazyText
+import           GHC.Stack                    (HasCallStack, withFrozenCallStack)
+import qualified Network.Socket               as Socket
 import           Prelude                      hiding (error, id)
 import qualified Prelude
 import           System.Exit                  (ExitCode (..))
@@ -442,10 +448,10 @@ type ContainerId = Text
 -- | Dumb logger abstraction to allow us to trace container execution.
 data Logger = Logger
   {
-    debug :: forall m . MonadIO m => Text -> m ()
-  , info  :: forall m . MonadIO m => Text -> m ()
-  , warn  :: forall m . MonadIO m => Text -> m ()
-  , error :: forall m . MonadIO m => Text -> m ()
+    debug :: forall m . (HasCallStack, MonadIO m) => Text -> m ()
+  , info  :: forall m . (HasCallStack, MonadIO m) => Text -> m ()
+  , warn  :: forall m . (HasCallStack, MonadIO m) => Text -> m ()
+  , error :: forall m . (HasCallStack, MonadIO m) => Text -> m ()
   }
 
 
@@ -506,6 +512,54 @@ waitUntilTimeout microseconds wait = WaitUntilReady $ \logger container@Containe
         throwM $ TimeoutException { id }
       Just _ ->
         pure ()
+
+
+-- | Waits until the port of a container is ready to accept connections.
+-- This combinator should always be used with `waitUntilTimeout`.
+waitUntilMappedPortReachable
+  :: Int
+  -> WaitUntilReady
+waitUntilMappedPortReachable port = WaitUntilReady $ \logger container ->
+  withFrozenCallStack $ do
+
+  let
+    -- TODO read host from contaer too
+    hostIp :: String
+    hostIp = "0.0.0.0"
+
+    hostPort :: String
+    hostPort = show $ mappedPort container port
+
+    resolve = do
+      let hints = Socket.defaultHints { Socket.addrSocketType = Socket.Stream }
+      head <$> Socket.getAddrInfo (Just hints) (Just hostIp) (Just hostPort)
+
+    open addr = do
+      socket <- Socket.socket
+        (Socket.addrFamily addr)
+        (Socket.addrSocketType addr)
+        (Socket.addrProtocol addr)
+      Socket.connect
+        socket
+        (Socket.addrAddress addr)
+      pure socket
+
+    retry = do
+      debug logger $ "Trying to open socket to " <> pack hostIp <> ":" <> pack hostPort
+      result <- try (resolve >>= open)
+      case result of
+        Right socket -> do
+          debug logger $ "Successfully opened socket to " <> pack hostIp <> ":" <> pack hostPort
+          Socket.close socket
+          pure ()
+
+        Left (exception :: IOException) -> do
+          debug logger $ "Failed to open socket to " <> pack hostIp <> ":" <>
+            pack hostPort <> " with " <> pack (show exception)
+          threadDelay 500000
+          retry
+
+  liftIO retry
 
 
 -- | A low-level primitive that allows scanning the logs for specific log lines
