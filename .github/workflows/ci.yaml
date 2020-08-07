@@ -7,12 +7,6 @@ on:
     branches: [master]
 
 jobs:
-  check:
-    - name: haskell-stan
-      uses: kowainik/stan-action@v0
-      with:
-        # Who to greet
-        who-to-greet: # default is World 
   cabal:
     name: ${{ matrix.os }} / ghc ${{ matrix.ghc }}
     runs-on: ${{ matrix.os }}
@@ -35,6 +29,9 @@ jobs:
             ghc: 8.6.5
 
     steps:
+    - name: haskell-stan
+      uses: kowainik/stan-action@v0
+          
     - uses: actions/checkout@v2
       if: github.event.action == 'opened' || github.event.action == 'synchronize' || github.event.ref == 'refs/heads/master'
 
