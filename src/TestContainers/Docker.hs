@@ -89,8 +89,8 @@ module TestContainers.Docker
 
   -- * Misc. Docker functions
 
-  , dockerVersion
-  , isDockerForDesktop
+  , dockerHostOs
+  , isDockerOnLinux
 
   -- * Wait until a socket is reachable
   , waitUntilMappedPortReachable
@@ -121,8 +121,7 @@ import qualified Data.Aeson.Optics            as Optics
 import qualified Data.ByteString.Lazy.Char8   as LazyByteString
 import           Data.Function                ((&))
 import           Data.List                    (find)
-import           Data.Text                    (Text, isInfixOf, pack, strip,
-                                               unpack)
+import           Data.Text                    (Text, pack, strip, unpack)
 import           Data.Text.Encoding.Error     (lenientDecode)
 import qualified Data.Text.Lazy               as LazyText
 import qualified Data.Text.Lazy.Encoding      as LazyText
@@ -179,18 +178,18 @@ defaultDockerConfig = Config
 dockerForMacConfig :: Config
 dockerForMacConfig = defaultDockerConfig
   {
-    configContainerIp = \_ -> "0.0.0.0"
+    configContainerIp = const "0.0.0.0"
   }
 
 
 -- | Autoselect the default configuration depending on wether you use Docker For
--- Mac/Desktop or not.
+-- Mac or not.
 determineConfig :: IO Config
 determineConfig = do
-  -- TODO We used to be clever here but it turned out that it wouldn't let
-  -- hosts reach containers. Even on linux! Figure out how to do Docker
-  -- networking properly.
-  pure dockerForMacConfig
+  dockerOnLinux <- runResourceT isDockerOnLinux
+  dho <- runResourceT dockerHostOs
+  pure $ if dockerOnLinux then defaultDockerConfig else dockerForMacConfig
+
 
 -- | Failing to interact with Docker results in this exception
 -- being thrown.
@@ -714,8 +713,10 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \logger _config container -
   withFrozenCallStack $ do
 
   let
+    -- TODO add a parameterizable function when we will support host
+    -- mapping exposure
     hostIp :: String
-    hostIp = unpack (containerIp container)
+    hostIp = "0.0.0.0"
 
     hostPort :: String
     hostPort = show $ containerPort container port
@@ -980,13 +981,11 @@ internalInspect id = do
       Prelude.error "Internal: Multiple results where I expected single result"
 
 
-dockerVersion :: (MonadResource m, MonadMask m, MonadIO m) => m Text
-dockerVersion = do
-  stdout <- docker [ "version", "--format", "{{.Server.KernelVersion}}" ]
-  return (pack stdout)
+dockerHostOs :: (MonadResource m, MonadMask m, MonadIO m) => m Text
+dockerHostOs =
+  strip . pack <$> docker [ "version", "--format", "{{.Server.Os}}" ]
 
 
-isDockerForDesktop :: (MonadResource m, MonadMask m, MonadIO m) => m Bool
-isDockerForDesktop = do
-  version <- dockerVersion
-  pure $ "linuxkit" `isInfixOf` version
+isDockerOnLinux :: (MonadResource m, MonadMask m, MonadIO m) => m Bool
+isDockerOnLinux =
+  ("linux" ==) <$> dockerHostOs
