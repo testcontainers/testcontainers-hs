@@ -104,7 +104,9 @@ module TestContainers.Docker
 
 import           Control.Concurrent           (threadDelay)
 import           Control.Exception            (IOException, throw)
-import           Control.Lens                 ((^?))
+import           Optics.Operators             ((^?))
+import           Optics.Optic                 ((%))
+import           Optics.Fold                  (pre)
 import           Control.Monad.Catch          (Exception, MonadCatch, MonadMask,
                                                MonadThrow, bracket, throwM, try)
 import           Control.Monad.Fix            (mfix)
@@ -115,7 +117,7 @@ import           Control.Monad.Trans.Resource (MonadResource (liftResourceT),
                                                ReleaseKey, ResIO, register,
                                                runResourceT)
 import           Data.Aeson                   (Value, decode')
-import qualified Data.Aeson.Lens              as Lens
+import qualified Data.Aeson.Optics            as Optics
 import qualified Data.ByteString.Lazy.Char8   as LazyByteString
 import           Data.Function                ((&))
 import           Data.List                    (find)
@@ -907,9 +909,9 @@ containerIp container@Container { config = Config { configContainerIp } } =
 internalContainerIp :: Container -> Text
 internalContainerIp Container { id, inspectOutput } =
   case inspectOutput
-    ^? Lens.key "NetworkSettings"
-    . Lens.key "IPAddress"
-    . Lens._String of
+    ^? Optics.key "NetworkSettings"
+    % Optics.key "IPAddress"
+    % Optics._String of
 
     Nothing ->
       throw $ InspectOutputUnexpected { id }
@@ -933,12 +935,12 @@ containerPort Container { id, inspectOutput } port =
     -- port from the right host address
 
     case inspectOutput
-      ^? Lens.key "NetworkSettings"
-      . Lens.key "Ports"
-      . Lens.key textPort
-      . Lens.values
-      . Lens.key "HostPort"
-      . Lens._String of
+    ^? pre (Optics.key "NetworkSettings"
+           % Optics.key "Ports"
+           % Optics.key textPort
+           % Optics.values
+           % Optics.key "HostPort"
+           % Optics._String) of
 
       Nothing ->
         throw $ UnknownPortMapping
