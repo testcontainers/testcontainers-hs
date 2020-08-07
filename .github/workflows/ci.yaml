@@ -7,6 +7,12 @@ on:
     branches: [master]
 
 jobs:
+  check:
+    - name: haskell-stan
+      uses: kowainik/stan-action@v0
+      with:
+        # Who to greet
+        who-to-greet: # default is World 
   cabal:
     name: ${{ matrix.os }} / ghc ${{ matrix.ghc }}
     runs-on: ${{ matrix.os }}
