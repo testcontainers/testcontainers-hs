@@ -91,8 +91,8 @@ module TestContainers
 
     -- * Misc. Docker functions
 
-  , dockerVersion
-  , isDockerForDesktop
+  , dockerHostOs
+  , isDockerOnLinux
 
     -- * Predefined Docker images
 
@@ -108,5 +108,3 @@ module TestContainers
 
 import           TestContainers.Docker as M
 import           TestContainers.Image  as M
-
-import           Data.Function         as M ((&))
