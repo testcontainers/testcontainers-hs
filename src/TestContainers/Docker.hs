@@ -187,9 +187,10 @@ dockerForMacConfig = defaultDockerConfig
 -- Mac/Desktop or not.
 determineConfig :: IO Config
 determineConfig = do
-  dockerForDesktop <- runResourceT $ isDockerForDesktop
-  pure $ if dockerForDesktop then dockerForMacConfig else defaultDockerConfig
-
+  -- TODO We used to be clever here but it turned out that it wouldn't let
+  -- hosts reach containers. Even on linux! Figure out how to do Docker
+  -- networking properly.
+  pure dockerForMacConfig
 
 -- | Failing to interact with Docker results in this exception
 -- being thrown.
