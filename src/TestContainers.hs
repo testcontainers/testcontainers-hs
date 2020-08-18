@@ -80,7 +80,6 @@ module TestContainers
 
   , Config(..)
   , defaultDockerConfig
-  , dockerForMacConfig
   , determineConfig
 
     -- * Exceptions

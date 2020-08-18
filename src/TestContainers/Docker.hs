@@ -15,7 +15,6 @@ module TestContainers.Docker
 
   , Config(..)
   , defaultDockerConfig
-  , dockerForMacConfig
   , determineConfig
 
   -- * Docker image
@@ -139,23 +138,9 @@ import           System.Timeout               (timeout)
 
 -- | Configuration for defaulting behavior.
 --
--- Note that IP address returned by `containerIp` is not reachable when using
--- Docker For Mac (See https://docs.docker.com/docker-for-mac/networking/#per-container-ip-addressing-is-not-possible).
---
--- If you are targeting Docker For Mac you should use `dockerForMacConfig`, instead
--- use `defaultDockerConfig`.
---
 -- @since 0.2.0.0
 --
 data Config = Config
-  {
-    -- | How to retrieve the IP address of a Docker container.
-    -- There some known limitations around Docker for Mac in that
-    -- it doesn't support accessing containers by their IP (see `containerIp`).
-    --
-    -- This configuration let's you define how to access the IP.
-    configContainerIp :: Container -> Text
-  }
 
 
 -- | Default configuration.
@@ -164,31 +149,13 @@ data Config = Config
 --
 defaultDockerConfig :: Config
 defaultDockerConfig = Config
-  {
-    configContainerIp = internalContainerIp
-  }
-
-
--- | A default configuration to use with Docker for Mac installations. It doesn't
--- use a Docker container's IP address to access a container, instead it always uses
--- the loopback interface @0.0.0.0@.
---
--- @since 0.2.0.0
---
-dockerForMacConfig :: Config
-dockerForMacConfig = defaultDockerConfig
-  {
-    configContainerIp = const "0.0.0.0"
-  }
 
 
 -- | Autoselect the default configuration depending on wether you use Docker For
 -- Mac or not.
 determineConfig :: IO Config
-determineConfig = do
-  dockerOnLinux <- runResourceT isDockerOnLinux
-  dho <- runResourceT dockerHostOs
-  pure $ if dockerOnLinux then defaultDockerConfig else dockerForMacConfig
+determineConfig =
+  pure defaultDockerConfig
 
 
 -- | Failing to interact with Docker results in this exception
@@ -903,8 +870,8 @@ containerReleaseKey Container { releaseKey } = releaseKey
 -- @since 0.1.0.0
 --
 containerIp :: Container -> Text
-containerIp container@Container { config = Config { configContainerIp } } =
-  configContainerIp container
+containerIp =
+  internalContainerIp
 
 
 -- | Get the IP address of a running Docker container using @docker inspect@.
