@@ -13,17 +13,12 @@ module TestContainers.Tasty
 import           Control.Monad.IO.Class                (liftIO)
 import           Control.Monad.Reader                  (runReaderT)
 import           Control.Monad.Trans.Resource          (InternalState,
-                                                        getInternalState,
-                                                        runResourceT)
+                                                        getInternalState)
 import           Control.Monad.Trans.Resource.Internal (stateAlloc,
                                                         stateCleanup)
 import           Data.Acquire                          (ReleaseType (ReleaseNormal))
 import           Test.Tasty                            (TestTree, withResource)
 
-import           TestContainers                        (Container,
-                                                        ContainerRequest,
-                                                        MonadDocker, ToImage,
-                                                        stop)
 import           TestContainers                        as Reexports
 
 
