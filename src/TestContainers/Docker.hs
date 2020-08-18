@@ -101,11 +101,9 @@ module TestContainers.Docker
   , (&)
   ) where
 
+import           Control.Applicative          ((<|>))
 import           Control.Concurrent           (threadDelay)
 import           Control.Exception            (IOException, throw)
-import           Optics.Operators             ((^?))
-import           Optics.Optic                 ((%))
-import           Optics.Fold                  (pre)
 import           Control.Monad.Catch          (Exception, MonadCatch, MonadMask,
                                                MonadThrow, bracket, throwM, try)
 import           Control.Monad.Fix            (mfix)
@@ -127,6 +125,9 @@ import qualified Data.Text.Lazy.Encoding      as LazyText
 import           GHC.Stack                    (HasCallStack,
                                                withFrozenCallStack)
 import qualified Network.Socket               as Socket
+import           Optics.Fold                  (pre)
+import           Optics.Operators             ((^?))
+import           Optics.Optic                 ((%))
 import           Prelude                      hiding (error, id)
 import qualified Prelude
 import           System.Exit                  (ExitCode (..))
@@ -141,6 +142,13 @@ import           System.Timeout               (timeout)
 -- @since 0.2.0.0
 --
 data Config = Config
+  {
+    -- | The number of seconds to maximally wait for a container to
+    -- become ready. Default is `Just 60`.
+    --
+    -- @Nothing@ <=> waits indefinitely.
+    configDefaultWaitTimeout :: Maybe Int
+  }
 
 
 -- | Default configuration.
@@ -149,6 +157,9 @@ data Config = Config
 --
 defaultDockerConfig :: Config
 defaultDockerConfig = Config
+  {
+    configDefaultWaitTimeout = Just 60
+  }
 
 
 -- | Autoselect the default configuration depending on wether you use Docker For
@@ -615,7 +626,7 @@ silentLogger = Logger
 --
 newtype WaitUntilReady = WaitUntilReady
   {
-    checkContainerReady :: Logger -> Config -> Container -> ResIO ()
+    checkContainerReady :: Logger -> Config -> Container -> (Maybe Int, ResIO ())
   }
 
 
@@ -657,15 +668,15 @@ instance Exception TimeoutException
 -- @since 0.1.0.0
 --
 waitUntilTimeout :: Int -> WaitUntilReady -> WaitUntilReady
-waitUntilTimeout seconds wait = WaitUntilReady $ \logger config container@Container{ id } -> do
-  withRunInIO $ \runInIO -> do
-    result <- timeout (seconds * 1000000) $
-      runInIO (checkContainerReady wait logger config container)
-    case result of
-      Nothing ->
-        throwM $ TimeoutException { id }
-      Just _ ->
-        pure ()
+waitUntilTimeout seconds wait = WaitUntilReady $ \logger config container ->
+  case checkContainerReady wait logger config container of
+    (Nothing, check) ->
+      (Just seconds, check)
+    (Just innerTimeout, check)
+      | innerTimeout > seconds ->
+          (Just seconds, check)
+      | otherwise ->
+          (Just innerTimeout, check)
 
 
 -- | Waits until the port of a container is ready to accept connections.
@@ -677,7 +688,7 @@ waitUntilMappedPortReachable
   :: Int
   -> WaitUntilReady
 waitUntilMappedPortReachable port = WaitUntilReady $ \logger _config container ->
-  withFrozenCallStack $ do
+  withFrozenCallStack $
 
   let
     -- TODO add a parameterizable function when we will support host
@@ -717,7 +728,8 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \logger _config container -
           threadDelay 500000
           retry
 
-  liftIO retry
+  in
+    (Nothing, liftIO retry)
 
 
 -- | A low-level primitive that allows scanning the logs for specific log lines
@@ -729,9 +741,12 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \logger _config container -
 -- @since 0.1.0.0
 --
 waitWithLogs :: (Container -> Handle -> Handle -> IO ()) -> WaitUntilReady
-waitWithLogs waiter = WaitUntilReady $ \_logger config container -> do
-  flip runReaderT config $ withLogs container $ \stdout stderr ->
-    liftIO $ waiter container stdout stderr
+waitWithLogs waiter = WaitUntilReady $ \_logger config container ->
+  let
+    check = flip runReaderT config $ withLogs container $ \stdout stderr ->
+      liftIO $ waiter container stdout stderr
+  in
+    (Nothing, check)
 
 
 -- | A data type indicating which pipe to scan for a specific log line.
@@ -786,9 +801,25 @@ waitForLogLine whereToLook matches = waitWithLogs $ \Container { id } stdout std
 -- @since 0.1.0.0
 --
 waitUntilReady :: MonadDocker m => Container -> WaitUntilReady -> m ()
-waitUntilReady container waiter = do
-  config <- ask
-  liftResourceT $ checkContainerReady waiter silentLogger config container
+waitUntilReady container@Container { id } waiter = do
+  config@Config { configDefaultWaitTimeout } <- ask
+  let
+    (timeoutInSeconds, check) =
+      checkContainerReady waiter silentLogger config container
+
+    withTimeout action = case timeoutInSeconds <|> configDefaultWaitTimeout of
+      Nothing ->
+        action
+      Just seconds ->
+        withRunInIO $ \runInIO -> do
+          result <- timeout (seconds * 1000000) $ runInIO check
+          case result of
+            Nothing ->
+              throwM $ TimeoutException { id }
+            Just _ ->
+              pure ()
+
+  liftResourceT (withTimeout check)
 
 
 -- | Handle to a Docker image.

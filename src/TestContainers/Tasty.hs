@@ -20,11 +20,34 @@ import           Control.Monad.Trans.Resource          (InternalState,
 import           Control.Monad.Trans.Resource.Internal (stateAlloc,
                                                         stateCleanup)
 import           Data.Acquire                          (ReleaseType (ReleaseNormal))
-import           Test.Tasty                            (TestTree, withResource)
+import           Test.Tasty                            (TestTree, askOption,
+                                                        withResource)
 import qualified Test.Tasty                            as Tasty
 import           Test.Tasty.Ingredients                (Ingredient)
+import           Test.Tasty.Options                    (IsOption (..),
+                                                        OptionDescription (..),
+                                                        safeRead)
 
+import           Data.Data                             (Proxy (Proxy))
 import           TestContainers                        as Reexports
+
+
+newtype DefaultTimeout = DefaultTimeout (Maybe Int)
+
+
+instance IsOption DefaultTimeout where
+
+  defaultValue =
+    DefaultTimeout Nothing
+
+  parseValue =
+    fmap (DefaultTimeout . Just) . safeRead
+
+  optionName =
+    pure "testcontainers-default-timeout"
+
+  optionHelp =
+    pure "The max. number of seconds to wait for a container to become ready"
 
 
 -- | Tasty `Ingredient` that adds useful options to control defaults within the
@@ -38,45 +61,31 @@ import           TestContainers                        as Reexports
 -- @since 0.3.0.0
 --
 ingredient :: Ingredient
-ingredient = Tasty.includingOptions [ ]
+ingredient = Tasty.includingOptions
+  [
+    Option (Proxy :: Proxy DefaultTimeout)
+  ]
 
 
--- | Allow `Tasty.TestTree` to depend on Docker containers. Tasty takes care of
--- initialization and de-initialization of the containers.
---
--- @
---
--- containers :: MonadDocker m => m ()
--- containers = do
---   _redis <- TestContainers.run $ TestContainers.containerRequest TestContainers.redis
---   _kafka <- TestContainers.run $ TestContainers.containerRequest TestContainers.kafka
---   pure ()
---
--- example :: TestTree
--- example =
---   withContainers containers $ \\runContainers -> testGroup "Example tests"
---     [
---       testCase "first test" $ do
---         -- Actually runs the container.
---         runContainers
---       testCase "second test" $ do
---         -- Start containers. Tasty makes sure to only initialize once as
---         --  `first test` might already have started them.
---         runContainers
---     ]
--- @
---
--- `withContainers` allows you naturally scope the handling of containers for your tests.
 withContainers
   :: forall a
   .  (forall m. MonadDocker m => m a)
   -> (IO a -> TestTree)
   -> TestTree
 withContainers startContainers tests =
+  askOption $ \ (DefaultTimeout defaultTimeout) ->
+
   let
     runC action = do
       config <- determineConfig
-      runReaderT (runResourceT action) config
+
+      let
+        actualConfig = config
+          {
+            configDefaultWaitTimeout = defaultTimeout
+          }
+
+      runReaderT (runResourceT action) actualConfig
 
     -- Correct resource handling is tricky here:
     -- Tasty offers a bracket alike in IO. We  have
