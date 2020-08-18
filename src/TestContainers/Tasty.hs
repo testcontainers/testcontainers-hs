@@ -3,8 +3,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module TestContainers.Tasty
   (
+    -- * Tasty Ingredient
+    ingredient
+
     -- * Running containers for tests
-    withContainers
+  , withContainers
 
     -- * Re-exports for convenience
   , module Reexports
@@ -18,8 +21,24 @@ import           Control.Monad.Trans.Resource.Internal (stateAlloc,
                                                         stateCleanup)
 import           Data.Acquire                          (ReleaseType (ReleaseNormal))
 import           Test.Tasty                            (TestTree, withResource)
+import qualified Test.Tasty                            as Tasty
+import           Test.Tasty.Ingredients                (Ingredient)
 
 import           TestContainers                        as Reexports
+
+
+-- | Tasty `Ingredient` that adds useful options to control defaults within the
+-- TetContainers library.
+--
+-- @
+-- main :: IO ()
+-- main = `Tasty.defaultMainWithIngredients` (`ingredient` : `Tasty.defaultIngredients`) tests
+-- @
+--
+-- @since 0.3.0.0
+--
+ingredient :: Ingredient
+ingredient = Tasty.includingOptions [ ]
 
 
 -- | Allow `Tasty.TestTree` to depend on Docker containers. Tasty takes care of
