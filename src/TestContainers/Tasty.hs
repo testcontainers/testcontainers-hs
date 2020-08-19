@@ -13,6 +13,7 @@ module TestContainers.Tasty
   , module Reexports
   ) where
 
+import           Control.Applicative                   ((<|>))
 import           Control.Monad.IO.Class                (liftIO)
 import           Control.Monad.Reader                  (runReaderT)
 import           Control.Monad.Trans.Resource          (InternalState,
@@ -82,7 +83,8 @@ withContainers startContainers tests =
       let
         actualConfig = config
           {
-            configDefaultWaitTimeout = defaultTimeout
+            configDefaultWaitTimeout =
+              defaultTimeout <|> configDefaultWaitTimeout config
           }
 
       runReaderT (runResourceT action) actualConfig
