@@ -21,16 +21,17 @@ import           Control.Monad.Trans.Resource          (InternalState,
 import           Control.Monad.Trans.Resource.Internal (stateAlloc,
                                                         stateCleanup)
 import           Data.Acquire                          (ReleaseType (ReleaseNormal))
+import           Data.Data                             (Proxy (Proxy))
 import           Test.Tasty                            (TestTree, askOption,
                                                         withResource)
 import qualified Test.Tasty                            as Tasty
 import           Test.Tasty.Ingredients                (Ingredient)
 import           Test.Tasty.Options                    (IsOption (..),
                                                         OptionDescription (..),
+                                                        mkFlagCLParser,
                                                         safeRead)
-
-import           Data.Data                             (Proxy (Proxy))
-import           TestContainers                        as Reexports
+import           TestContainers                        as Reexports hiding
+                                                                    (Trace)
 
 
 newtype DefaultTimeout = DefaultTimeout (Maybe Int)
@@ -51,6 +52,27 @@ instance IsOption DefaultTimeout where
     pure "The max. number of seconds to wait for a container to become ready"
 
 
+newtype Trace = Trace Bool
+
+
+instance IsOption Trace where
+
+  defaultValue =
+    Trace False
+
+  parseValue =
+    const Nothing
+
+  optionCLParser =
+    mkFlagCLParser mempty (Trace True)
+
+  optionName =
+    pure "testcontainers-trace"
+
+  optionHelp =
+    pure "Turns on tracing of the underlying Docker operations"
+
+
 -- | Tasty `Ingredient` that adds useful options to control defaults within the
 -- TetContainers library.
 --
@@ -65,6 +87,7 @@ ingredient :: Ingredient
 ingredient = Tasty.includingOptions
   [
     Option (Proxy :: Proxy DefaultTimeout)
+  , Option (Proxy :: Proxy Trace)
   ]
 
 
@@ -75,16 +98,25 @@ withContainers
   -> TestTree
 withContainers startContainers tests =
   askOption $ \ (DefaultTimeout defaultTimeout) ->
-
+  askOption $ \ (Trace enableTrace) ->
   let
+    tracer :: Tracer
+    tracer
+      | enableTrace = newTracer $ \message ->
+          putStrLn (show message)
+      | otherwise =
+          mempty
+
     runC action = do
       config <- determineConfig
 
       let
+        actualConfig :: Config
         actualConfig = config
           {
             configDefaultWaitTimeout =
               defaultTimeout <|> configDefaultWaitTimeout config
+          , configTracer = tracer
           }
 
       runReaderT (runResourceT action) actualConfig

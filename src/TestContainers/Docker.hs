@@ -1,12 +1,17 @@
-{-# LANGUAGE BangPatterns          #-}
-{-# LANGUAGE ConstraintKinds       #-}
-{-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE FlexibleContexts      #-}
-{-# LANGUAGE NamedFieldPuns        #-}
-{-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE PatternSynonyms       #-}
-{-# LANGUAGE RankNTypes            #-}
-{-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE BangPatterns               #-}
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE DuplicateRecordFields      #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE NamedFieldPuns             #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE PatternSynonyms            #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE UndecidableInstances       #-}
 module TestContainers.Docker
   (
     MonadDocker
@@ -16,6 +21,13 @@ module TestContainers.Docker
   , Config(..)
   , defaultDockerConfig
   , determineConfig
+
+  -- * Exeuction tracing
+
+  , Tracer
+  , Trace(..)
+  , newTracer
+  , withTrace
 
   -- * Docker image
 
@@ -116,14 +128,14 @@ import           Control.Monad.Trans.Resource (MonadResource (liftResourceT),
 import           Data.Aeson                   (Value, decode')
 import qualified Data.Aeson.Optics            as Optics
 import qualified Data.ByteString.Lazy.Char8   as LazyByteString
+import           Data.Foldable                (traverse_)
 import           Data.Function                ((&))
 import           Data.List                    (find)
 import           Data.Text                    (Text, pack, strip, unpack)
 import           Data.Text.Encoding.Error     (lenientDecode)
 import qualified Data.Text.Lazy               as LazyText
 import qualified Data.Text.Lazy.Encoding      as LazyText
-import           GHC.Stack                    (HasCallStack,
-                                               withFrozenCallStack)
+import           GHC.Stack                    (withFrozenCallStack)
 import qualified Network.Socket               as Socket
 import           Optics.Fold                  (pre)
 import           Optics.Operators             ((^?))
@@ -137,6 +149,53 @@ import qualified System.Process               as Process
 import           System.Timeout               (timeout)
 
 
+-- | Type representing various events during testcontainer execution.
+data Trace
+  -- | The low-level invocation of @docker@ command
+  --
+  -- @
+  --   TraceDockerInvocation args stdin exitcode
+  -- @
+  = TraceDockerInvocation [Text] Text ExitCode -- docker [args] [stdin]
+  -- | Line written to STDOUT by a Docker process.
+  | TraceDockerStdout Text
+  -- | Line written to STDERR by a Docker process.
+  | TraceDockerStderr Text
+  -- | Waiting for a container to become ready. Attached with the
+  -- timeout to wait (in seconds).
+  | TraceWaitUntilReady (Maybe Int)
+  -- | Opening socket
+  | TraceOpenSocket Text Int (Maybe IOException)
+
+
+deriving stock instance Eq Trace
+deriving stock instance Show Trace
+
+
+-- | Traces execution within testcontainers library.
+newtype Tracer = Tracer { unTracer :: Trace -> IO () }
+
+
+deriving newtype instance Semigroup Tracer
+deriving newtype instance Monoid Tracer
+
+
+-- | Construct a new `Tracer` from a tracing function.
+newTracer
+  :: (Trace -> IO ())
+  -> Tracer
+newTracer action = Tracer
+  {
+    unTracer = action
+  }
+
+
+withTrace :: MonadIO m => Tracer -> Trace -> m ()
+withTrace tracer trace =
+  liftIO $ unTracer tracer trace
+{-# INLINE withTrace #-}
+
+
 -- | Configuration for defaulting behavior.
 --
 -- @since 0.2.0.0
@@ -148,6 +207,8 @@ data Config = Config
     --
     -- @Nothing@ <=> waits indefinitely.
     configDefaultWaitTimeout :: Maybe Int
+    -- | Traces execution inside testcontainers library.
+  , configTracer             :: Tracer
   }
 
 
@@ -159,6 +220,7 @@ defaultDockerConfig :: Config
 defaultDockerConfig = Config
   {
     configDefaultWaitTimeout = Just 60
+  , configTracer = mempty
   }
 
 
@@ -365,7 +427,9 @@ run request = do
       [ [ tag ] ] ++
       [ command | Just command <- [cmd] ]
 
-  stdout <- docker dockerRun
+  config@Config { configTracer } <- ask
+
+  stdout <- docker configTracer dockerRun
 
   let
     id :: ContainerId
@@ -375,9 +439,8 @@ run request = do
 
     -- Careful, this is really meant to be lazy
     ~inspectOutput = unsafePerformIO $
-      internalInspect id
+      internalInspect configTracer id
 
-  config <- ask
   container <- liftResourceT $ mfix $ \container -> do
       -- Note: We have to tie the knot as the resulting container
       -- carries the release key as well.
@@ -405,9 +468,9 @@ run request = do
 --
 -- @since 0.1.0.0
 --
-docker :: MonadIO m => [Text] -> m String
-docker args =
-  dockerWithStdin args ""
+docker :: MonadIO m => Tracer -> [Text] -> m String
+docker tracer args =
+  dockerWithStdin tracer args ""
 
 
 -- | Internal function that runs Docker. Takes care of throwing an exception
@@ -415,10 +478,16 @@ docker args =
 --
 -- @since 0.1.0.0
 --
-dockerWithStdin :: MonadIO m => [Text] -> Text -> m String
-dockerWithStdin args stdin = liftIO $ do
+dockerWithStdin :: MonadIO m => Tracer -> [Text] -> Text -> m String
+dockerWithStdin tracer args stdin = liftIO $ do
   (exitCode, stdout, stderr) <- Process.readProcessWithExitCode "docker"
     (map unpack args) (unpack stdin)
+
+  withTrace tracer (TraceDockerInvocation args stdin exitCode)
+
+  -- TODO output these concurrently with the process
+  traverse_ (withTrace tracer . TraceDockerStdout . pack) (lines stdout)
+  traverse_ (withTrace tracer . TraceDockerStderr . pack) (lines stderr)
 
   case exitCode of
     ExitSuccess -> pure stdout
@@ -435,7 +504,8 @@ dockerWithStdin args stdin = liftIO $ do
 --
 kill :: MonadDocker m => Container -> m ()
 kill Container { id } = do
-  _ <- docker [ "kill", id ]
+  tracer <- askTracer
+  _ <- docker tracer [ "kill", id ]
   return ()
 
 
@@ -445,7 +515,8 @@ kill Container { id } = do
 --
 stop :: MonadDocker m => Container -> m ()
 stop Container { id } = do
-  _ <- docker [ "stop", id ]
+  tracer <- askTracer
+  _ <- docker tracer [ "stop", id ]
   return ()
 
 
@@ -455,7 +526,8 @@ stop Container { id } = do
 --
 rm :: MonadDocker m => Container -> m ()
 rm Container { id } = do
-  _ <- docker [ "rm", "-f", "-v", id ]
+  tracer <- askTracer
+  _ <- docker tracer [ "rm", "-f", "-v", id ]
   return ()
 
 
@@ -540,7 +612,8 @@ defaultToImage action = ToImage
 --
 fromTag :: ImageTag -> ToImage
 fromTag tag = defaultToImage $ do
-  output <- docker [ "pull", "--quiet", tag ]
+  tracer <- askTracer
+  output <- docker tracer [ "pull", "--quiet", tag ]
   return $ Image
     {
       tag = strip (pack output)
@@ -563,7 +636,8 @@ fromBuildContext path mdockerfile = defaultToImage $ do
           [ "build", "-f", pack dockerfile, pack path ]
       | otherwise =
           [ "build", pack path ]
-  output <- docker args
+  tracer <- askTracer
+  output <- docker tracer args
   return $ Image
     {
       tag = strip (pack output)
@@ -578,7 +652,8 @@ fromDockerfile
   :: Text
   -> ToImage
 fromDockerfile dockerfile = defaultToImage $ do
-  output <- dockerWithStdin [ "build", "--quiet", "-" ] dockerfile
+  tracer <- askTracer
+  output <- dockerWithStdin tracer [ "build", "--quiet", "-" ] dockerfile
   return $ Image
     {
       tag = strip (pack output)
@@ -592,33 +667,6 @@ fromDockerfile dockerfile = defaultToImage $ do
 type ContainerId = Text
 
 
--- | Dumb logger abstraction to allow us to trace container execution.
---
--- @since 0.1.0.0
---
-data Logger = Logger
-  {
-    debug :: forall m . (HasCallStack, MonadIO m) => Text -> m ()
-  , info  :: forall m . (HasCallStack, MonadIO m) => Text -> m ()
-  , warn  :: forall m . (HasCallStack, MonadIO m) => Text -> m ()
-  , error :: forall m . (HasCallStack, MonadIO m) => Text -> m ()
-  }
-
-
--- | Logger that doesn't log anything.
---
--- @since 0.1.0.0
---
-silentLogger :: Logger
-silentLogger = Logger
-  {
-    debug = \_ -> pure ()
-  , info  = \_ -> pure ()
-  , warn  = \_ -> pure ()
-  , error = \_ -> pure ()
-  }
-
-
 -- | A strategy that describes how to asses readiness of a `Container`. Allows
 -- Users to plug in their definition of readiness.
 --
@@ -626,7 +674,7 @@ silentLogger = Logger
 --
 newtype WaitUntilReady = WaitUntilReady
   {
-    checkContainerReady :: Logger -> Config -> Container -> (Maybe Int, ResIO ())
+    checkContainerReady :: Config -> Container -> (Maybe Int, ResIO ())
   }
 
 
@@ -668,8 +716,8 @@ instance Exception TimeoutException
 -- @since 0.1.0.0
 --
 waitUntilTimeout :: Int -> WaitUntilReady -> WaitUntilReady
-waitUntilTimeout seconds wait = WaitUntilReady $ \logger config container ->
-  case checkContainerReady wait logger config container of
+waitUntilTimeout seconds wait = WaitUntilReady $ \config container ->
+  case checkContainerReady wait config container of
     (Nothing, check) ->
       (Just seconds, check)
     (Just innerTimeout, check)
@@ -687,21 +735,23 @@ waitUntilTimeout seconds wait = WaitUntilReady $ \logger config container ->
 waitUntilMappedPortReachable
   :: Int
   -> WaitUntilReady
-waitUntilMappedPortReachable port = WaitUntilReady $ \logger _config container ->
+waitUntilMappedPortReachable port = WaitUntilReady $ \config container ->
   withFrozenCallStack $
 
   let
+    Config { configTracer } = config
+
     -- TODO add a parameterizable function when we will support host
     -- mapping exposure
     hostIp :: String
     hostIp = "0.0.0.0"
 
-    hostPort :: String
-    hostPort = show $ containerPort container port
+    hostPort :: Int
+    hostPort = containerPort container port
 
     resolve = do
       let hints = Socket.defaultHints { Socket.addrSocketType = Socket.Stream }
-      head <$> Socket.getAddrInfo (Just hints) (Just hostIp) (Just hostPort)
+      head <$> Socket.getAddrInfo (Just hints) (Just hostIp) (Just (show hostPort))
 
     open addr = do
       socket <- Socket.socket
@@ -714,17 +764,16 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \logger _config container -
       pure socket
 
     retry = do
-      debug logger $ "Trying to open socket to " <> pack hostIp <> ":" <> pack hostPort
       result <- try (resolve >>= open)
       case result of
         Right socket -> do
-          debug logger $ "Successfully opened socket to " <> pack hostIp <> ":" <> pack hostPort
+          withTrace configTracer (TraceOpenSocket (pack hostIp) hostPort Nothing)
           Socket.close socket
           pure ()
 
         Left (exception :: IOException) -> do
-          debug logger $ "Failed to open socket to " <> pack hostIp <> ":" <>
-            pack hostPort <> " with " <> pack (show exception)
+          withTrace configTracer
+            (TraceOpenSocket (pack hostIp) hostPort (Just exception))
           threadDelay 500000
           retry
 
@@ -741,7 +790,7 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \logger _config container -
 -- @since 0.1.0.0
 --
 waitWithLogs :: (Container -> Handle -> Handle -> IO ()) -> WaitUntilReady
-waitWithLogs waiter = WaitUntilReady $ \_logger config container ->
+waitWithLogs waiter = WaitUntilReady $ \config container ->
   let
     check = flip runReaderT config $ withLogs container $ \stdout stderr ->
       liftIO $ waiter container stdout stderr
@@ -802,17 +851,21 @@ waitForLogLine whereToLook matches = waitWithLogs $ \Container { id } stdout std
 --
 waitUntilReady :: MonadDocker m => Container -> WaitUntilReady -> m ()
 waitUntilReady container@Container { id } waiter = do
-  config@Config { configDefaultWaitTimeout } <- ask
+  config@Config { configDefaultWaitTimeout, configTracer } <- ask
   let
     (timeoutInSeconds, check) =
-      checkContainerReady waiter silentLogger config container
+      checkContainerReady waiter config container
+
+    runAction action timeoutSeconds = do
+      withTrace configTracer (TraceWaitUntilReady timeoutSeconds)
+      action
 
     withTimeout action = case timeoutInSeconds <|> configDefaultWaitTimeout of
       Nothing ->
-        action
+        runAction action Nothing
       Just seconds ->
         withRunInIO $ \runInIO -> do
-          result <- timeout (seconds * 1000000) $ runInIO check
+          result <- timeout (seconds * 1000000) $ runInIO (runAction action (Just seconds))
           case result of
             Nothing ->
               throwM $ TimeoutException { id }
@@ -965,9 +1018,9 @@ inspect Container { inspectOutput } =
 --
 -- @since 0.1.0.0
 --
-internalInspect :: (MonadThrow m, MonadIO m) => ContainerId -> m InspectOutput
-internalInspect id = do
-  stdout <- docker [ "inspect", id ]
+internalInspect :: (MonadThrow m, MonadIO m) => Tracer -> ContainerId -> m InspectOutput
+internalInspect tracer id = do
+  stdout <- docker tracer [ "inspect", id ]
   case decode' (LazyByteString.pack stdout) of
     Nothing ->
       throwM $ InspectOutputInvalidJSON { id }
@@ -979,11 +1032,19 @@ internalInspect id = do
       Prelude.error "Internal: Multiple results where I expected single result"
 
 
-dockerHostOs :: (MonadResource m, MonadMask m, MonadIO m) => m Text
-dockerHostOs =
-  strip . pack <$> docker [ "version", "--format", "{{.Server.Os}}" ]
+askTracer :: MonadReader Config m => m Tracer
+askTracer = do
+  Config { configTracer } <- ask
+  pure configTracer
+{-# INLINE askTracer #-}
 
 
-isDockerOnLinux :: (MonadResource m, MonadMask m, MonadIO m) => m Bool
+dockerHostOs :: MonadDocker m => m Text
+dockerHostOs = do
+  tracer <- askTracer
+  strip . pack <$> docker tracer [ "version", "--format", "{{.Server.Os}}" ]
+
+
+isDockerOnLinux :: MonadDocker m => m Bool
 isDockerOnLinux =
   ("linux" ==) <$> dockerHostOs
