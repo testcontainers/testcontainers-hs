@@ -82,6 +82,12 @@ module TestContainers
   , defaultDockerConfig
   , determineConfig
 
+    -- *
+
+  , Tracer
+  , Trace(..)
+  , newTracer
+
     -- * Exceptions
 
   , M.DockerException(..)
