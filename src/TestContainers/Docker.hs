@@ -816,7 +816,7 @@ data Pipe
 -- Say you want to find "Ready to accept connections" in the logs on Stdout try:
 --
 -- @
--- wairForLogLine Stdout ("Ready to accept connections" ``LazyText.isInfixOf``)
+-- waitForLogLine Stdout ("Ready to accept connections" ``LazyText.isInfixOf``)
 -- @
 --
 -- @since 0.1.0.0
