@@ -71,6 +71,7 @@ module TestContainers.Docker
   , setEnv
   , setLink
   , setExpose
+  , setVolume
   , setWaitingFor
   , run
 
@@ -387,6 +388,15 @@ setWaitingFor :: WaitUntilReady -> ContainerRequest -> ContainerRequest
 setWaitingFor newWaitingFor req =
   req { readiness = Just newWaitingFor }
 
+
+-- | Set volume mounts for the container. This is equivalent to passing @--volume host:container@
+-- to @docker run@.
+--
+-- @since 0.3.0.2
+--
+setVolume :: [(Text, Text)] -> ContainerRequest -> ContainerRequest
+setVolume newVol req =
+  req { volumeMounts = newVol }
 
 -- | Runs a Docker container from an `Image` and `ContainerRequest`. A finalizer
 -- is registered so that the container is aways stopped when it goes out of scope.
