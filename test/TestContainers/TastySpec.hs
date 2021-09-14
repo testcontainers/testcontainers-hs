@@ -6,7 +6,7 @@ import           Data.Text.Lazy       (isInfixOf)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 import           TestContainers.Tasty (MonadDocker, Pipe (Stdout),
-                                       containerRequest, fromTag, redis, run,
+                                       containerRequest, fromBuildContext, fromTag, redis, run,
                                        setExpose, setRm, setWaitingFor,
                                        waitForLogLine,
                                        waitUntilMappedPortReachable,
@@ -24,6 +24,8 @@ containers1 = do
   _rabbitmq <- run $ containerRequest (fromTag "rabbitmq:3.8.4")
     & setRm False
     & setWaitingFor (waitForLogLine Stdout (("completed with" `isInfixOf`)))
+
+  _test <- run $ containerRequest (fromBuildContext "./test/container1" Nothing)
 
   pure ()
 
