@@ -643,9 +643,9 @@ fromBuildContext path mdockerfile = defaultToImage $ do
   let
     args
       | Just dockerfile <- mdockerfile =
-          [ "build", "-f", pack dockerfile, pack path ]
+          [ "build", "--quiet", "-f", pack dockerfile, pack path ]
       | otherwise =
-          [ "build", pack path ]
+          [ "build", "--quiet", pack path ]
   tracer <- askTracer
   output <- docker tracer args
   return $ Image
