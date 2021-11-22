@@ -67,6 +67,7 @@ module TestContainers.Docker
   , containerRequest
   , setName
   , setCmd
+  , setVolumeMounts
   , setRm
   , setEnv
   , setLink
@@ -329,6 +330,14 @@ setCmd :: [Text] -> ContainerRequest -> ContainerRequest
 setCmd newCmd req =
   req { cmd = Just newCmd }
 
+
+-- | The volume mounts to link to Docker container. This is the equivalent
+-- of passing the command on the @docker run -v@ invocation.
+--
+--
+setVolumeMounts :: [(Text, Text)] -> ContainerRequest -> ContainerRequest
+setVolumeMounts newVolumeMounts req =
+  req { volumeMounts = newVolumeMounts }
 
 -- | Wether to remove the container once exited. This is equivalent to passing
 -- @--rm@ to @docker run@. (default is `True`).
