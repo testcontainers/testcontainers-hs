@@ -26,6 +26,7 @@ module TestContainers
 
   , M.setName
   , M.setCmd
+  , M.setVolumeMounts
   , M.setRm
   , M.setEnv
   , M.setLink
