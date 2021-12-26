@@ -1,6 +1,6 @@
 cabal-version:       >=1.10
 name:                testcontainers
-version:             0.3.0.1
+version:             0.3.1.0
 synopsis:            Docker containers for your integration tests.
 description:         testcontainers is a Haskell library that provides a friendly API to
                      run Docker containers. It is designed to create a runtime environment
