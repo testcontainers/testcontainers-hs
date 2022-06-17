@@ -25,6 +25,9 @@ module TestContainers
   , M.containerRequest
 
   , M.setName
+  , M.setFixedName
+  , M.setSuffixedName
+  , M.setRandomName
   , M.setCmd
   , M.setVolumeMounts
   , M.setRm

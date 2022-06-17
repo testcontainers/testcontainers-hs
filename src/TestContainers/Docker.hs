@@ -66,6 +66,9 @@ module TestContainers.Docker
   , ContainerRequest
   , containerRequest
   , setName
+  , setFixedName
+  , setSuffixedName
+  , setRandomName
   , setCmd
   , setVolumeMounts
   , setRm
@@ -117,6 +120,7 @@ module TestContainers.Docker
 import           Control.Applicative          ((<|>))
 import           Control.Concurrent           (threadDelay)
 import           Control.Exception            (IOException, throw)
+import           Control.Monad                (replicateM)
 import           Control.Monad.Catch          (Exception, MonadCatch, MonadMask,
                                                MonadThrow, bracket, throwM, try)
 import           Control.Monad.Fix            (mfix)
@@ -144,6 +148,7 @@ import           Optics.Optic                 ((%))
 import           Prelude                      hiding (error, id)
 import qualified Prelude
 import           System.Exit                  (ExitCode (..))
+import qualified System.Random                as Random
 import           System.IO                    (Handle, hClose)
 import           System.IO.Unsafe             (unsafePerformIO)
 import qualified System.Process               as Process
@@ -285,10 +290,20 @@ data ContainerRequest = ContainerRequest
   , exposedPorts :: [Int]
   , volumeMounts :: [(Text, Text)]
   , links        :: [ContainerId]
-  , name         :: Maybe Text
+  , naming       :: NamingStrategy
   , rmOnExit     :: Bool
   , readiness    :: Maybe WaitUntilReady
   }
+
+
+-- | Parameters for a naming a Docker container.
+--
+-- @since 0.4.0.0
+--
+data NamingStrategy
+  = RandomName
+  | FixedName Text
+  | SuffixedName Text
 
 
 -- | Default `ContainerRequest`. Used as base for every Docker container.
@@ -299,7 +314,7 @@ containerRequest :: ToImage -> ContainerRequest
 containerRequest image = ContainerRequest
   {
     toImage      = image
-  , name         = Nothing
+  , naming       = RandomName
   , cmd          = Nothing
   , env          = []
   , exposedPorts = []
@@ -316,9 +331,41 @@ containerRequest image = ContainerRequest
 -- @since 0.1.0.0
 --
 setName :: Text -> ContainerRequest -> ContainerRequest
-setName newName req =
+setName = setFixedName
+{-# DEPRECATED setName "See setFixedName" #-}
+
+
+-- | Set the name of a Docker container. This is equivalent to invoking @docker run@
+-- with the @--name@ parameter.
+--
+-- @since 0.4.0.0
+--
+setFixedName :: Text -> ContainerRequest -> ContainerRequest
+setFixedName newName req =
   -- TODO error on empty Text
-  req { name = Just newName }
+  req { naming = FixedName newName }
+
+
+-- | Set the name randomly given of a Docker container. This is equivalent to omitting
+--  the @--name@ parameter calling @docker run@.
+--
+-- @since 0.4.0.0
+--
+setRandomName :: ContainerRequest -> ContainerRequest
+setRandomName req =
+  -- TODO error on empty Text
+  req { naming = RandomName }
+
+
+-- | Set the name randomly suffixed of a Docker container. This is equivalent to invoking
+-- @docker run@ with the @--name@ parameter.
+--
+-- @since 0.4.0.0
+--
+setSuffixedName :: Text -> ContainerRequest -> ContainerRequest
+setSuffixedName preffix req =
+  -- TODO error on empty Text
+  req { naming = SuffixedName preffix }
 
 
 -- | The command to execute inside the Docker container. This is the equivalent
@@ -410,7 +457,7 @@ run request = do
     ContainerRequest
       {
         toImage
-      , name
+      , naming
       , cmd
       , env
       , exposedPorts
@@ -421,6 +468,14 @@ run request = do
       } = request
 
   image@Image{ tag } <- runToImage toImage
+
+  name <-
+    case naming of
+      RandomName -> return Nothing
+      FixedName n -> return $ Just n
+      SuffixedName prefix ->
+        Just . (prefix <>) . ("-" <>) . pack
+          <$> replicateM 6 (Random.randomRIO ('a', 'z'))
 
   let
     dockerRun :: [Text]
