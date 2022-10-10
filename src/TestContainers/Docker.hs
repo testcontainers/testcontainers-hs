@@ -73,6 +73,7 @@ module TestContainers.Docker
   , setVolumeMounts
   , setRm
   , setEnv
+  , setNetwork
   , setLink
   , setExpose
   , setWaitingFor
@@ -289,6 +290,7 @@ data ContainerRequest = ContainerRequest
   , env          :: [(Text, Text)]
   , exposedPorts :: [Int]
   , volumeMounts :: [(Text, Text)]
+  , network      :: Maybe Text
   , links        :: [ContainerId]
   , naming       :: NamingStrategy
   , rmOnExit     :: Bool
@@ -319,6 +321,7 @@ containerRequest image = ContainerRequest
   , env          = []
   , exposedPorts = []
   , volumeMounts = []
+  , network      = Nothing
   , links        = []
   , rmOnExit     = True
   , readiness    = Nothing
@@ -406,6 +409,16 @@ setEnv newEnv req =
   req { env = newEnv }
 
 
+-- | Set the network the container will connect to. This is equivalent to passing
+-- @--network network_name@ to @docker run@.
+--
+-- @since 0.4.0.0
+--
+setNetwork :: Text -> ContainerRequest -> ContainerRequest
+setNetwork networkName req =
+  req { network = Just networkName }
+
+
 -- | Set link on the container. This is equivalent to passing @--link other_container@
 -- to @docker run@.
 --
@@ -462,6 +475,7 @@ run request = do
       , env
       , exposedPorts
       , volumeMounts
+      , network
       , links
       , rmOnExit
       , readiness
@@ -485,6 +499,7 @@ run request = do
       [ [ "--name", containerName ] | Just containerName <- [name] ] ++
       [ [ "--env", variable <> "=" <> value  ] | (variable, value) <- env ] ++
       [ [ "--publish", pack (show port)] | port <- exposedPorts ] ++
+      [ [ "--network", networkName] | Just networkName <- [network] ] ++
       [ [ "--link", container ] | container <- links ] ++
       [ [ "--volume", src <> ":" <> dest ] | (src, dest) <- volumeMounts ] ++
       [ [ "--rm" ] | rmOnExit ] ++

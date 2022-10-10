@@ -32,6 +32,7 @@ module TestContainers
   , M.setVolumeMounts
   , M.setRm
   , M.setEnv
+  , M.setNetwork
   , M.setLink
   , M.setExpose
   , M.setWaitingFor
