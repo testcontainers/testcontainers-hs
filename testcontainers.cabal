@@ -27,7 +27,7 @@ library
                        TestContainers.Image
                        TestContainers.Tasty
 
-  -- other-modules:
+  other-modules:       TestContainers.AesonCompat
   -- other-extensions:
   build-depends:       base                 >=4.12 && <5,
                        aeson                >= 1.4.6 && < 3,

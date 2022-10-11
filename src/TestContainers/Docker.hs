@@ -156,7 +156,7 @@ import           System.IO                    (Handle, hClose)
 import           System.IO.Unsafe             (unsafePerformIO)
 import qualified System.Process               as Process
 import           System.Timeout               (timeout)
-
+import           TestContainers.AesonCompat   (toKey)
 
 -- | Type representing various events during testcontainer execution.
 data Trace
@@ -1093,7 +1093,7 @@ containerPort Container { id, inspectOutput } port =
     case inspectOutput
     ^? pre (Optics.key "NetworkSettings"
            % Optics.key "Ports"
-           % Optics.key textPort
+           % Optics.key (toKey textPort)
            % Optics.values
            % Optics.key "HostPort"
            % Optics._String) of
