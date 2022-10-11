@@ -148,6 +148,7 @@ import           Optics.Operators             ((^?))
 import           Optics.Optic                 ((%))
 import           Prelude                      hiding (error, id)
 import qualified Prelude
+import           System.Directory             (doesFileExist)
 import           System.Exit                  (ExitCode (..))
 import qualified System.Random                as Random
 import           System.IO                    (Handle, hClose)
@@ -253,9 +254,10 @@ data DockerException
       -- | Docker's STDERR output.
     , stderr   :: Text
     }
-  | InspectUnknownContainerId { id :: ContainerId }
-  | InspectOutputInvalidJSON  { id :: ContainerId }
-  | InspectOutputUnexpected   { id :: ContainerId }
+  | InspectUnknownContainerId     { id :: ContainerId }
+  | InspectOutputInvalidJSON      { id :: ContainerId }
+  | InspectOutputMissingNetwork   { id :: ContainerId }
+  | InspectOutputUnexpected       { id :: ContainerId }
   | UnknownPortMapping
     {
       -- | Id of the `Container` that we tried to lookup the
@@ -820,15 +822,7 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \config container ->
   let
     Config { configTracer } = config
 
-    -- TODO add a parameterizable function when we will support host
-    -- mapping exposure
-    hostIp :: String
-    hostIp = "0.0.0.0"
-
-    hostPort :: Int
-    hostPort = containerPort container port
-
-    resolve = do
+    resolve hostIp hostPort = do
       let hints = Socket.defaultHints { Socket.addrSocketType = Socket.Stream }
       head <$> Socket.getAddrInfo (Just hints) (Just hostIp) (Just (show hostPort))
 
@@ -843,7 +837,13 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \config container ->
       pure socket
 
     retry = do
-      result <- try (resolve >>= open)
+      inDocker <- isRunningInDocker
+      let hostIp = if inDocker
+                       then unpack $ containerGateway container
+                       else "localhost"
+          hostPort = containerPort container port
+
+      result <- try (resolve hostIp hostPort >>= open)
       case result of
         Right socket -> do
           withTrace configTracer (TraceOpenSocket (pack hostIp) hostPort Nothing)
@@ -1052,6 +1052,29 @@ internalContainerIp Container { id, inspectOutput } =
       address
 
 
+-- | Get the IP address for the container's gateway, i.e. the host.
+-- Takes the first gateway address found.
+--
+-- @since 0.4.0.0
+--
+containerGateway :: Container -> Text
+containerGateway Container { id, inspectOutput } =
+    case inspectOutput
+    ^? pre (Optics.key "NetworkSettings"
+           % Optics.key "Networks"
+           % Optics.members
+           % Optics.key "Gateway"
+           % Optics._String) of
+
+      Nothing ->
+        throw $ InspectOutputMissingNetwork
+          {
+            id
+          }
+      Just gatewayIp ->
+        gatewayIp
+
+
 -- | Looks up an exposed port on the host.
 --
 -- @since 0.1.0.0
@@ -1127,3 +1150,8 @@ dockerHostOs = do
 isDockerOnLinux :: MonadDocker m => m Bool
 isDockerOnLinux =
   ("linux" ==) <$> dockerHostOs
+
+
+-- | Detects if we are actually running in a Docker container.
+isRunningInDocker :: MonadIO m => m Bool
+isRunningInDocker = liftIO $ doesFileExist "/.dockerenv"
