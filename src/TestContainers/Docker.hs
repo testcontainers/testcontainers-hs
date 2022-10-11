@@ -43,6 +43,7 @@ module TestContainers.Docker
 
   , containerId
   , containerImage
+  , containerGateway
   , containerIp
   , containerPort
   , containerReleaseKey
