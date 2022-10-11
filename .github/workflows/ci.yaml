@@ -13,18 +13,10 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest] # [macOS-latest, windows-latest] do not come with docker :(
-        cabal: ["3.2"]
+        cabal: ["3.8.1.0"]
         ghc:
-          - "8.8.3"
-          - "8.10.1"
-          - "8.10.2"
-        exclude:
-          - os: macOS-latest
-            ghc: 8.8.3
-          - os: windows-latest
-            ghc: 8.8.3
-          - os: windows-latest
-            ghc: 8.6.5
+          - "9.2.4"
+          - "9.4.2"
 
     steps:
     - uses: actions/checkout@v2
