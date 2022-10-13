@@ -7,7 +7,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE PatternSynonyms            #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE StandaloneDeriving         #-}
@@ -112,6 +111,9 @@ module TestContainers.Docker
   -- * Wait until a socket is reachable
   , waitUntilMappedPortReachable
 
+  -- * Wait until the http server responds with a specific status code
+  , waitForHttp
+
   -- * Reexports for convenience
   , ResIO
   , runResourceT
@@ -122,7 +124,7 @@ module TestContainers.Docker
 import           Control.Applicative          ((<|>))
 import           Control.Concurrent           (threadDelay)
 import           Control.Exception            (IOException, throw)
-import           Control.Monad                (replicateM)
+import           Control.Monad                (replicateM, unless)
 import           Control.Monad.Catch          (Exception, MonadCatch, MonadMask,
                                                MonadThrow, bracket, throwM, try)
 import           Control.Monad.Fix            (mfix)
@@ -135,6 +137,7 @@ import           Control.Monad.Trans.Resource (MonadResource (liftResourceT),
 import           Data.Aeson                   (Value, decode')
 import qualified Data.Aeson.Optics            as Optics
 import qualified Data.ByteString.Lazy.Char8   as LazyByteString
+import qualified Data.ByteString.UTF8         as BSU
 import           Data.Foldable                (traverse_)
 import           Data.Function                ((&))
 import           Data.List                    (find)
@@ -143,6 +146,11 @@ import           Data.Text.Encoding.Error     (lenientDecode)
 import qualified Data.Text.Lazy               as LazyText
 import qualified Data.Text.Lazy.Encoding      as LazyText
 import           GHC.Stack                    (withFrozenCallStack)
+import           Network.HTTP.Client          (HttpException, Request (..),
+                                               defaultManagerSettings,
+                                               defaultRequest, httpNoBody,
+                                               newManager, responseStatus)
+import           Network.HTTP.Types           (statusCode)
 import qualified Network.Socket               as Socket
 import           Optics.Fold                  (pre)
 import           Optics.Operators             ((^?))
@@ -151,10 +159,10 @@ import           Prelude                      hiding (error, id)
 import qualified Prelude
 import           System.Directory             (doesFileExist)
 import           System.Exit                  (ExitCode (..))
-import qualified System.Random                as Random
 import           System.IO                    (Handle, hClose)
 import           System.IO.Unsafe             (unsafePerformIO)
 import qualified System.Process               as Process
+import qualified System.Random                as Random
 import           System.Timeout               (timeout)
 
 
@@ -175,6 +183,8 @@ data Trace
   | TraceWaitUntilReady (Maybe Int)
   -- | Opening socket
   | TraceOpenSocket Text Int (Maybe IOException)
+  -- | Call HTTP endpoint
+  | TraceHttpCall Text Int (Either String Int)
 
 
 deriving stock instance Eq Trace
@@ -807,6 +817,48 @@ waitUntilTimeout seconds wait = WaitUntilReady $ \config container ->
           (Just seconds, check)
       | otherwise ->
           (Just innerTimeout, check)
+
+
+-- | Waits for a specific http status code.
+-- This combinator should always be used with `waitUntilTimeout`.
+--
+-- @since 0.4.0.0
+--
+waitForHttp
+  :: Int
+  -> String
+  -> [Int]
+  -> WaitUntilReady
+waitForHttp port path acceptableStatusCodes = WaitUntilReady $ \config container ->
+  let
+    Config { configTracer } = config
+
+    wait = newManager defaultManagerSettings >>= retry
+    retry manager = do
+      inDocker <- isRunningInDocker
+      let hostIp = if inDocker
+                       then unpack $ containerGateway container
+                       else "localhost"
+          hostPort = containerPort container port
+          req = defaultRequest {
+              host = BSU.fromString hostIp,
+              port = hostPort,
+              path = BSU.fromString path
+            }
+
+      result <- try $ statusCode . responseStatus <$> httpNoBody req manager
+      hasSucceeded <- case result of
+            Right code -> do
+              withTrace configTracer
+                (TraceHttpCall (pack hostIp) hostPort (Right code))
+              pure $ code `elem` acceptableStatusCodes
+            Left (exception :: HttpException) -> do
+              withTrace configTracer
+                (TraceHttpCall (pack hostIp) hostPort (Left $ show exception))
+              pure False
+      unless hasSucceeded $ threadDelay 500000 *> retry manager
+  in
+    (Nothing, liftIO wait)
 
 
 -- | Waits until the port of a container is ready to accept connections.
