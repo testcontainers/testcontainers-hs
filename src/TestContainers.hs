@@ -78,6 +78,9 @@ module TestContainers
 
   , M.waitUntilMappedPortReachable
 
+    -- ** Wait until the http server responds with a specific status code
+  , M.waitForHttp
+
     -- * Monad
 
   , M.MonadDocker
