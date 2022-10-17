@@ -42,9 +42,11 @@ module TestContainers.Docker
 
   , containerId
   , containerImage
+  , containerAlias
   , containerGateway
   , containerIp
   , containerPort
+  , containerAddress
   , containerReleaseKey
 
   -- * Referring to images
@@ -142,6 +144,7 @@ import           Data.Foldable                (traverse_)
 import           Data.Function                ((&))
 import           Data.List                    (find)
 import           Data.Text                    (Text, pack, strip, unpack)
+import           Data.Text.Encoding           (encodeUtf8)
 import           Data.Text.Encoding.Error     (lenientDecode)
 import qualified Data.Text.Lazy               as LazyText
 import qualified Data.Text.Lazy.Encoding      as LazyText
@@ -835,14 +838,10 @@ waitForHttp port path acceptableStatusCodes = WaitUntilReady $ \config container
 
     wait = newManager defaultManagerSettings >>= retry
     retry manager = do
-      inDocker <- isRunningInDocker
-      let hostIp = if inDocker
-                       then unpack $ containerGateway container
-                       else "localhost"
-          hostPort = containerPort container port
-          req = defaultRequest {
-              host = BSU.fromString hostIp,
-              port = hostPort,
+      (endpointHost, endpointPort) <- containerAddress container port
+      let req = defaultRequest {
+              host = encodeUtf8 endpointHost,
+              port = endpointPort,
               path = BSU.fromString path
             }
 
@@ -850,11 +849,11 @@ waitForHttp port path acceptableStatusCodes = WaitUntilReady $ \config container
       hasSucceeded <- case result of
             Right code -> do
               withTrace configTracer
-                (TraceHttpCall (pack hostIp) hostPort (Right code))
+                (TraceHttpCall endpointHost endpointPort (Right code))
               pure $ code `elem` acceptableStatusCodes
             Left (exception :: HttpException) -> do
               withTrace configTracer
-                (TraceHttpCall (pack hostIp) hostPort (Left $ show exception))
+                (TraceHttpCall endpointHost endpointPort (Left $ show exception))
               pure False
       unless hasSucceeded $ threadDelay 500000 *> retry manager
   in
@@ -875,9 +874,9 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \config container ->
   let
     Config { configTracer } = config
 
-    resolve hostIp hostPort = do
+    resolve endpointHost endpointPort = do
       let hints = Socket.defaultHints { Socket.addrSocketType = Socket.Stream }
-      head <$> Socket.getAddrInfo (Just hints) (Just hostIp) (Just (show hostPort))
+      head <$> Socket.getAddrInfo (Just hints) (Just endpointHost) (Just (show endpointPort))
 
     open addr = do
       socket <- Socket.socket
@@ -890,22 +889,18 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \config container ->
       pure socket
 
     retry = do
-      inDocker <- isRunningInDocker
-      let hostIp = if inDocker
-                       then unpack $ containerGateway container
-                       else "localhost"
-          hostPort = containerPort container port
+      (endpointHost, endpointPort) <- containerAddress container port
 
-      result <- try (resolve hostIp hostPort >>= open)
+      result <- try (resolve (unpack endpointHost) endpointPort >>= open)
       case result of
         Right socket -> do
-          withTrace configTracer (TraceOpenSocket (pack hostIp) hostPort Nothing)
+          withTrace configTracer (TraceOpenSocket endpointHost endpointPort Nothing)
           Socket.close socket
           pure ()
 
         Left (exception :: IOException) -> do
           withTrace configTracer
-            (TraceOpenSocket (pack hostIp) hostPort (Just exception))
+            (TraceOpenSocket endpointHost endpointPort (Just exception))
           threadDelay 500000
           retry
 
@@ -1105,6 +1100,30 @@ internalContainerIp Container { id, inspectOutput } =
       address
 
 
+-- | Get the container's network alias.
+-- Takes the first alias found.
+--
+-- @since 0.4.0.0
+--
+containerAlias :: Container -> Text
+containerAlias Container { id, inspectOutput } =
+    case inspectOutput
+    ^? pre (Optics.key "NetworkSettings"
+           % Optics.key "Networks"
+           % Optics.members
+           % Optics.key "Aliases"
+           % Optics.values
+           % Optics._String) of
+
+      Nothing ->
+        throw $ InspectOutputMissingNetwork
+          {
+            id
+          }
+      Just alias ->
+        alias
+
+
 -- | Get the IP address for the container's gateway, i.e. the host.
 -- Takes the first gateway address found.
 --
@@ -1159,6 +1178,20 @@ containerPort Container { id, inspectOutput } port =
       Just hostPort ->
         read (unpack hostPort)
 
+
+-- | Returns the domain and port exposing the given container's port. Differs
+-- from 'containerPort' in that 'containerAddress' will return the container's
+-- domain and port if the program is running in the same network. Otherwise,
+-- 'containerAddress' will use the exposed port on the Docker host.
+--
+-- @since 0.4.0.0
+--
+containerAddress :: MonadIO m => Container -> Int -> m (Text, Int)
+containerAddress container port = do
+  inDocker <- isRunningInDocker
+  pure $ if inDocker
+            then (containerAlias container, port)
+            else ("localhost", containerPort container port)
 
 -- | Runs the `docker inspect` command. Memoizes the result.
 --
