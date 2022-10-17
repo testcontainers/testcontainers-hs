@@ -40,9 +40,11 @@ module TestContainers
     -- * Running Docker containers (@docker run@)
 
   , M.Container
+  , M.containerAlias
   , M.containerGateway
   , M.containerIp
   , M.containerPort
+  , M.containerAddress
   , M.containerReleaseKey
   , M.containerImage
 
