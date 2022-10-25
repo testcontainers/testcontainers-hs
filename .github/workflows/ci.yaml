@@ -19,6 +19,7 @@ jobs:
           - 8.10.7
           - 9.0.2
           - 9.2.4
+          - 9.4.2
 
     steps:
     - uses: actions/checkout@v2
