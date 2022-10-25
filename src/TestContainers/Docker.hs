@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns               #-}
 {-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
 {-# LANGUAGE FlexibleContexts           #-}
@@ -137,6 +138,9 @@ import           Control.Monad.Trans.Resource (MonadResource (liftResourceT),
                                                ReleaseKey, ResIO, register,
                                                runResourceT)
 import           Data.Aeson                   (Value, decode')
+#if MIN_VERSION_aeson_optics(1,2,0)
+import qualified Data.Aeson.Key               as Key
+#endif
 import qualified Data.Aeson.Optics            as Optics
 import qualified Data.ByteString.Lazy.Char8   as LazyByteString
 import qualified Data.ByteString.UTF8         as BSU
@@ -1164,7 +1168,12 @@ containerPort Container { id, inspectOutput } port =
     case inspectOutput
     ^? pre (Optics.key "NetworkSettings"
            % Optics.key "Ports"
-           % Optics.key textPort
+           % Optics.key 
+#if MIN_VERSION_aeson_optics(1,2,0)
+                (Key.fromText textPort)
+#else
+                textPort
+#endif     
            % Optics.values
            % Optics.key "HostPort"
            % Optics._String) of
