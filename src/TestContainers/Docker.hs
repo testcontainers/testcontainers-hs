@@ -1,6 +1,5 @@
 {-# LANGUAGE BangPatterns               #-}
 {-# LANGUAGE ConstraintKinds            #-}
-{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
 {-# LANGUAGE FlexibleContexts           #-}
@@ -138,15 +137,13 @@ import           Control.Monad.Trans.Resource (MonadResource (liftResourceT),
                                                ReleaseKey, ResIO, register,
                                                runResourceT)
 import           Data.Aeson                   (Value, decode')
-#if MIN_VERSION_aeson_optics(1,2,0)
-import qualified Data.Aeson.Key               as Key
-#endif
 import qualified Data.Aeson.Optics            as Optics
 import qualified Data.ByteString.Lazy.Char8   as LazyByteString
 import qualified Data.ByteString.UTF8         as BSU
 import           Data.Foldable                (traverse_)
 import           Data.Function                ((&))
 import           Data.List                    (find)
+import           Data.String                  (IsString (..))
 import           Data.Text                    (Text, pack, strip, unpack)
 import           Data.Text.Encoding           (encodeUtf8)
 import           Data.Text.Encoding.Error     (lenientDecode)
@@ -1159,8 +1156,9 @@ containerPort :: Container -> Int -> Int
 containerPort Container { id, inspectOutput } port =
   let
     -- TODO also support UDP ports
-    textPort :: Text
-    textPort = pack (show port) <> "/tcp"
+    -- Using IsString so it works both with Text (aeson<2) and Aeson.Key (aeson>=2)
+    textPort :: IsString s => s
+    textPort = fromString $ show port <> "/tcp"
   in
     -- TODO be more mindful, make sure to grab the
     -- port from the right host address
@@ -1168,12 +1166,7 @@ containerPort Container { id, inspectOutput } port =
     case inspectOutput
     ^? pre (Optics.key "NetworkSettings"
            % Optics.key "Ports"
-           % Optics.key 
-#if MIN_VERSION_aeson_optics(1,2,0)
-                (Key.fromText textPort)
-#else
-                textPort
-#endif     
+           % Optics.key textPort
            % Optics.values
            % Optics.key "HostPort"
            % Optics._String) of
