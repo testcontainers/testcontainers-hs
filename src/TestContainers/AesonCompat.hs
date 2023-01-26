@@ -1,13 +1,15 @@
 {-# LANGUAGE CPP #-}
-module TestContainers.AesonCompat (
-    toKey
-) where 
+
+module TestContainers.AesonCompat
+  ( toKey,
+  )
+where
 
 #if MIN_VERSION_aeson(2,0,0)
 import qualified Data.Aeson.Key as Key
 #else
 #endif
-import qualified Data.Text                  as T
+import qualified Data.Text as T
 
 #if MIN_VERSION_aeson(2,0,0)
 type Key = Key.Key
