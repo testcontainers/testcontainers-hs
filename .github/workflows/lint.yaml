@@ -1,0 +1,29 @@
+name: Lint
+
+# Trigger the workflow on push or pull request, but only for the master branch
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      if: github.event.action == 'opened' || github.event.action == 'synchronize' || github.event.ref == 'refs/heads/master'
+
+    - name: Check code is formatted using Ormolu
+      run: |
+        curl -L https://github.com/tweag/ormolu/releases/download/0.5.3.0/ormolu-Linux.zip -o ormolu.zip
+        unzip ormolu.zip
+
+        git ls-files | grep \.hs | xargs ./ormolu --mode=inplace
+        if [[ $(git diff --stat) != '' ]]; then
+          echo "Lint stage failed, running ormolu has returned changes"
+          echo "$(git diff)"
+          exit 1
+        else
+          echo "Lint stage succeeded"
+          exit 0
+        fi
