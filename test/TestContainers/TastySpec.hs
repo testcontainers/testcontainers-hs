@@ -7,8 +7,8 @@ import Data.Text.Lazy (isInfixOf)
 import Test.Tasty
 import Test.Tasty.HUnit
 import TestContainers.Tasty
-  ( MonadDocker,
-    Pipe (Stdout),
+  ( Pipe (Stdout),
+    TestContainer,
     containerRequest,
     fromBuildContext,
     fromTag,
@@ -26,7 +26,7 @@ import TestContainers.Tasty
   )
 
 containers1 ::
-  (MonadDocker m) => m ()
+  TestContainer ()
 containers1 = do
   _redisContainer <-
     run $

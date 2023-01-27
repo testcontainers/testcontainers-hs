@@ -4,7 +4,7 @@ module TestContainers.HspecSpec (main, spec_all) where
 
 import Test.Hspec
 import TestContainers.Hspec
-  ( MonadDocker,
+  ( TestContainer,
     containerRequest,
     redis,
     run,
@@ -12,7 +12,7 @@ import TestContainers.Hspec
   )
 
 containers1 ::
-  (MonadDocker m) => m ()
+  TestContainer ()
 containers1 = do
   _ <- run $ containerRequest redis
   pure ()
