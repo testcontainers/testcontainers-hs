@@ -1,20 +1,23 @@
 {-# LANGUAGE OverloadedStrings #-}
-module TestContainers.Image
-  (
-    -- * Collection of pre-defined Docker images
-    redis
 
-  , mongo
+module TestContainers.Image
+  ( -- * Collection of pre-defined Docker images
+    redis,
+    mongo,
 
     -- * Building and managing images
-  , module Docker
+    module Docker,
+  )
+where
 
-  ) where
-
-import           TestContainers.Docker as Docker (Image, ToImage, build,
-                                                  fromBuildContext,
-                                                  fromDockerfile, fromTag)
-
+import TestContainers.Docker as Docker
+  ( Image,
+    ToImage,
+    build,
+    fromBuildContext,
+    fromDockerfile,
+    fromTag,
+  )
 
 -- | Image for Redis database.
 --
@@ -23,11 +26,9 @@ import           TestContainers.Docker as Docker (Image, ToImage, build,
 -- @
 --
 -- @since 0.1.0.0
---
 redis :: ToImage
 redis =
   fromTag "redis:5.0"
-
 
 -- | Image for Mongo database.
 --
@@ -36,7 +37,6 @@ redis =
 -- @
 --
 -- @since 0.1.0.0
---
 mongo :: ToImage
 mongo =
   fromTag "mongo:4.0.17"
