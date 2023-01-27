@@ -115,8 +115,6 @@ import Control.Exception (IOException, throw)
 import Control.Monad (replicateM, unless)
 import Control.Monad.Catch
   ( Exception,
-    MonadCatch,
-    MonadMask,
     MonadThrow,
     bracket,
     throwM,
@@ -168,38 +166,10 @@ import System.IO.Unsafe (unsafePerformIO)
 import qualified System.Process as Process
 import qualified System.Random as Random
 import System.Timeout (timeout)
+import TestContainers.Monad (Config (..), MonadDocker, defaultDockerConfig, determineConfig)
 import TestContainers.Trace (Trace (..), Tracer, newTracer, withTrace)
 import Prelude hiding (error, id)
 import qualified Prelude
-
--- | Configuration for defaulting behavior.
---
--- @since 0.2.0.0
-data Config = Config
-  { -- | The number of seconds to maximally wait for a container to
-    -- become ready. Default is `Just 60`.
-    --
-    -- @Nothing@ <=> waits indefinitely.
-    configDefaultWaitTimeout :: Maybe Int,
-    -- | Traces execution inside testcontainers library.
-    configTracer :: Tracer
-  }
-
--- | Default configuration.
---
--- @since 0.2.0.0
-defaultDockerConfig :: Config
-defaultDockerConfig =
-  Config
-    { configDefaultWaitTimeout = Just 60,
-      configTracer = mempty
-    }
-
--- | Autoselect the default configuration depending on wether you use Docker For
--- Mac or not.
-determineConfig :: IO Config
-determineConfig =
-  pure defaultDockerConfig
 
 -- | Failing to interact with Docker results in this exception
 -- being thrown.
@@ -229,12 +199,6 @@ data DockerException
   deriving (Eq, Show)
 
 instance Exception DockerException
-
--- | Docker related functionality is parameterized over this `Monad`.
---
--- @since 0.1.0.0
-type MonadDocker m =
-  (MonadIO m, MonadMask m, MonadThrow m, MonadCatch m, MonadResource m, MonadReader Config m)
 
 -- | Parameters for a running a Docker container.
 --
