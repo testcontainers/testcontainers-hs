@@ -168,53 +168,9 @@ import System.IO.Unsafe (unsafePerformIO)
 import qualified System.Process as Process
 import qualified System.Random as Random
 import System.Timeout (timeout)
+import TestContainers.Trace (Trace (..), Tracer, newTracer, withTrace)
 import Prelude hiding (error, id)
 import qualified Prelude
-
--- | Type representing various events during testcontainer execution.
-data Trace
-  = -- | The low-level invocation of @docker@ command
-    --
-    -- @
-    --   TraceDockerInvocation args stdin exitcode
-    -- @
-    TraceDockerInvocation [Text] Text ExitCode -- docker [args] [stdin]
-  | -- | Line written to STDOUT by a Docker process.
-    TraceDockerStdout Text
-  | -- | Line written to STDERR by a Docker process.
-    TraceDockerStderr Text
-  | -- | Waiting for a container to become ready. Attached with the
-    -- timeout to wait (in seconds).
-    TraceWaitUntilReady (Maybe Int)
-  | -- | Opening socket
-    TraceOpenSocket Text Int (Maybe IOException)
-  | -- | Call HTTP endpoint
-    TraceHttpCall Text Int (Either String Int)
-
-deriving stock instance Eq Trace
-
-deriving stock instance Show Trace
-
--- | Traces execution within testcontainers library.
-newtype Tracer = Tracer {unTracer :: Trace -> IO ()}
-
-deriving newtype instance Semigroup Tracer
-
-deriving newtype instance Monoid Tracer
-
--- | Construct a new `Tracer` from a tracing function.
-newTracer ::
-  (Trace -> IO ()) ->
-  Tracer
-newTracer action =
-  Tracer
-    { unTracer = action
-    }
-
-withTrace :: (MonadIO m) => Tracer -> Trace -> m ()
-withTrace tracer trace =
-  liftIO $ unTracer tracer trace
-{-# INLINE withTrace #-}
 
 -- | Configuration for defaulting behavior.
 --
