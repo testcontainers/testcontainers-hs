@@ -13,10 +13,10 @@ where
 
 import Control.Exception (bracket)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader (runReaderT)
 import Control.Monad.Trans.Resource
   ( InternalState,
     getInternalState,
+    liftResourceT,
   )
 import Control.Monad.Trans.Resource.Internal
   ( stateAlloc,
@@ -24,6 +24,7 @@ import Control.Monad.Trans.Resource.Internal
   )
 import Data.Acquire (ReleaseType (ReleaseNormal))
 import TestContainers as Reexports
+import TestContainers.Monad (runTestContainer)
 
 -- | Allow `Hspec.Spec` to depend on Docker containers. Hspec takes care of
 -- initialization and de-initialization of the containers.
@@ -46,19 +47,19 @@ import TestContainers as Reexports
 -- `withContainers` allows you naturally scope the handling of containers for your tests.
 withContainers ::
   forall a.
-  (forall m. (MonadDocker m) => m a) ->
+  TestContainer a ->
   (a -> IO ()) ->
   IO ()
 withContainers startContainers = dropState $ bracket acquire release
   where
     runC action = do
       config <- determineConfig
-      runReaderT (runResourceT action) config
+      runTestContainer config action
 
     acquire :: IO (a, InternalState)
     acquire = runC $ do
       result <- startContainers
-      releaseMap <- getInternalState
+      releaseMap <- liftResourceT getInternalState
 
       liftIO $ stateAlloc releaseMap
       pure (result, releaseMap)

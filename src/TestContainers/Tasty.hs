@@ -16,10 +16,10 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader (runReaderT)
 import Control.Monad.Trans.Resource
   ( InternalState,
     getInternalState,
+    liftResourceT,
   )
 import Control.Monad.Trans.Resource.Internal
   ( stateAlloc,
@@ -43,6 +43,7 @@ import Test.Tasty.Options
 import TestContainers as Reexports hiding
   ( Trace,
   )
+import TestContainers.Monad (runTestContainer)
 
 newtype DefaultTimeout = DefaultTimeout (Maybe Int)
 
@@ -95,7 +96,7 @@ ingredient =
 
 withContainers ::
   forall a.
-  (forall m. (MonadDocker m) => m a) ->
+  TestContainer a ->
   (IO a -> TestTree) ->
   TestTree
 withContainers startContainers tests =
@@ -119,7 +120,7 @@ withContainers startContainers tests =
                       configTracer = tracer
                     }
 
-            runReaderT (runResourceT action) actualConfig
+            runTestContainer actualConfig action
 
           -- Correct resource handling is tricky here:
           -- Tasty offers a bracket alike in IO. We  have
@@ -129,7 +130,7 @@ withContainers startContainers tests =
           acquire :: IO (a, InternalState)
           acquire = runC $ do
             result <- startContainers
-            releaseMap <- getInternalState
+            releaseMap <- liftResourceT getInternalState
 
             -- N.B. runResourceT runs the finalizers on every
             -- resource. We don't want it to! We want to run

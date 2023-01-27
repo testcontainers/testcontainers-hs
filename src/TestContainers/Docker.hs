@@ -10,10 +10,12 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module TestContainers.Docker
   ( MonadDocker,
+    TestContainer,
 
     -- * Configuration
     Config (..),
@@ -123,7 +125,7 @@ import Control.Monad.Catch
 import Control.Monad.Fix (mfix)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.IO.Unlift (MonadUnliftIO (withRunInIO))
-import Control.Monad.Reader (MonadReader (..), runReaderT)
+import Control.Monad.Reader (MonadReader (..))
 import Control.Monad.Trans.Resource
   ( MonadResource (liftResourceT),
     ReleaseKey,
@@ -166,7 +168,14 @@ import System.IO.Unsafe (unsafePerformIO)
 import qualified System.Process as Process
 import qualified System.Random as Random
 import System.Timeout (timeout)
-import TestContainers.Monad (Config (..), MonadDocker, defaultDockerConfig, determineConfig)
+import TestContainers.Monad
+  ( Config (..),
+    MonadDocker,
+    TestContainer,
+    defaultDockerConfig,
+    determineConfig,
+    runTestContainer,
+  )
 import TestContainers.Trace (Trace (..), Tracer, newTracer, withTrace)
 import Prelude hiding (error, id)
 import qualified Prelude
@@ -352,7 +361,7 @@ setWaitingFor newWaitingFor req =
 -- This function is essentially @docker run@.
 --
 -- @since 0.1.0.0
-run :: (MonadDocker m) => ContainerRequest -> m Container
+run :: ContainerRequest -> TestContainer Container
 run request = do
   let ContainerRequest
         { toImage,
@@ -409,7 +418,7 @@ run request = do
   container <- liftResourceT $ mfix $ \container -> do
     -- Note: We have to tie the knot as the resulting container
     -- carries the release key as well.
-    releaseKey <- register $ runReaderT (runResourceT (stop container)) config
+    releaseKey <- register $ runTestContainer config (stop container)
     pure $
       Container
         { id,
@@ -466,7 +475,7 @@ dockerWithStdin tracer args stdin = liftIO $ do
 -- | Kills a Docker container. `kill` is essentially @docker kill@.
 --
 -- @since 0.1.0.0
-kill :: (MonadDocker m) => Container -> m ()
+kill :: Container -> TestContainer ()
 kill Container {id} = do
   tracer <- askTracer
   _ <- docker tracer ["kill", id]
@@ -475,7 +484,7 @@ kill Container {id} = do
 -- | Stops a Docker container. `stop` is essentially @docker stop@.
 --
 -- @since 0.1.0.0
-stop :: (MonadDocker m) => Container -> m ()
+stop :: Container -> TestContainer ()
 stop Container {id} = do
   tracer <- askTracer
   _ <- docker tracer ["stop", id]
@@ -484,7 +493,7 @@ stop Container {id} = do
 -- | Remove a Docker container. `rm` is essentially @docker rm -f@
 --
 -- @since 0.1.0.0
-rm :: (MonadDocker m) => Container -> m ()
+rm :: Container -> TestContainer ()
 rm Container {id} = do
   tracer <- askTracer
   _ <- docker tracer ["rm", "-f", "-v", id]
@@ -494,9 +503,9 @@ rm Container {id} = do
 -- @docker logs@ under the hood.
 --
 -- @since 0.1.0.0
-withLogs :: forall m a. (MonadDocker m) => Container -> (Handle -> Handle -> m a) -> m a
+withLogs :: Container -> (Handle -> Handle -> TestContainer a) -> TestContainer a
 withLogs Container {id} logger = do
-  let acquire :: m (Handle, Handle, Handle, Process.ProcessHandle)
+  let acquire :: TestContainer (Handle, Handle, Handle, Process.ProcessHandle)
       acquire =
         liftIO $
           Process.runInteractiveProcess
@@ -505,7 +514,7 @@ withLogs Container {id} logger = do
             Nothing
             Nothing
 
-      release :: (Handle, Handle, Handle, Process.ProcessHandle) -> m ()
+      release :: (Handle, Handle, Handle, Process.ProcessHandle) -> TestContainer ()
       release (stdin, stdout, stderr, handle) =
         liftIO $
           Process.cleanupProcess
@@ -525,7 +534,7 @@ type ImageTag = Text
 --
 -- @since 0.1.0.0
 data ToImage = ToImage
-  { runToImage :: forall m. (MonadDocker m) => m Image,
+  { runToImage :: TestContainer Image,
     applyToContainerRequest :: ContainerRequest -> ContainerRequest
   }
 
@@ -535,7 +544,7 @@ data ToImage = ToImage
 -- underlying Docker build once and re-use the resulting `Image`.
 --
 -- @since 0.1.0.0
-build :: (MonadDocker m) => ToImage -> m ToImage
+build :: ToImage -> TestContainer ToImage
 build toImage@ToImage {applyToContainerRequest} = do
   image <- runToImage toImage
   return $
@@ -547,7 +556,7 @@ build toImage@ToImage {applyToContainerRequest} = do
 -- | Default `ToImage`. Doesn't apply anything to to `ContainerRequests`.
 --
 -- @since 0.1.0.0
-defaultToImage :: (forall m. (MonadDocker m) => m Image) -> ToImage
+defaultToImage :: TestContainer Image -> ToImage
 defaultToImage action =
   ToImage
     { runToImage = action,
@@ -611,7 +620,7 @@ type ContainerId = Text
 --
 -- @since 0.1.0.0
 newtype WaitUntilReady = WaitUntilReady
-  { checkContainerReady :: Config -> Container -> (Maybe Int, ResIO ())
+  { checkContainerReady :: Config -> Container -> (Maybe Int, TestContainer ())
   }
 
 -- | The exception thrown by `waitForLine` in case the expected log line
@@ -741,8 +750,8 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \config container ->
 --
 -- @since 0.1.0.0
 waitWithLogs :: (Container -> Handle -> Handle -> IO ()) -> WaitUntilReady
-waitWithLogs waiter = WaitUntilReady $ \config container ->
-  let check = flip runReaderT config $ withLogs container $ \stdout stderr ->
+waitWithLogs waiter = WaitUntilReady $ \_config container ->
+  let check = withLogs container $ \stdout stderr ->
         liftIO $ waiter container stdout stderr
    in (Nothing, check)
 
@@ -790,7 +799,7 @@ waitForLogLine whereToLook matches = waitWithLogs $ \Container {id} stdout stder
 -- depending on the used `WaitUntilReady` on the container.
 --
 -- @since 0.1.0.0
-waitUntilReady :: (MonadDocker m) => Container -> WaitUntilReady -> m ()
+waitUntilReady :: Container -> WaitUntilReady -> TestContainer ()
 waitUntilReady container@Container {id} waiter = do
   config@Config {configDefaultWaitTimeout, configTracer} <- ask
   let (timeoutInSeconds, check) =
@@ -812,7 +821,7 @@ waitUntilReady container@Container {id} waiter = do
               Just _ ->
                 pure ()
 
-  liftResourceT (withTimeout check)
+  withTimeout check
 
 -- | Handle to a Docker image.
 --
@@ -983,7 +992,7 @@ containerAddress container port = do
 -- | Runs the `docker inspect` command. Memoizes the result.
 --
 -- @since 0.1.0.0
-inspect :: (MonadDocker m) => Container -> m InspectOutput
+inspect :: Container -> TestContainer InspectOutput
 inspect Container {inspectOutput} =
   pure inspectOutput
 
@@ -1009,12 +1018,12 @@ askTracer = do
   pure configTracer
 {-# INLINE askTracer #-}
 
-dockerHostOs :: (MonadDocker m) => m Text
+dockerHostOs :: TestContainer Text
 dockerHostOs = do
   tracer <- askTracer
   strip . pack <$> docker tracer ["version", "--format", "{{.Server.Os}}"]
 
-isDockerOnLinux :: (MonadDocker m) => m Bool
+isDockerOnLinux :: TestContainer Bool
 isDockerOnLinux =
   ("linux" ==) <$> dockerHostOs
 

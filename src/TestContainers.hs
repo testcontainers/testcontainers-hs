@@ -69,6 +69,7 @@ module TestContainers
 
     -- * Monad
     M.MonadDocker,
+    M.TestContainer,
 
     -- * Configuration
     Config (..),

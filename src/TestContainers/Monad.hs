@@ -1,8 +1,15 @@
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
 module TestContainers.Monad
-  ( MonadDocker,
+  ( -- * Monad
+    MonadDocker,
+    TestContainer,
+    runTestContainer,
 
     -- * Runtime configuration
     Config (..),
@@ -12,27 +19,55 @@ module TestContainers.Monad
   )
 where
 
+import Control.Applicative (liftA2)
 import Control.Monad.Catch
   ( MonadCatch,
     MonadMask,
     MonadThrow,
   )
 import Control.Monad.IO.Class (MonadIO)
-import Control.Monad.Reader (MonadReader)
-import Control.Monad.Trans.Resource (MonadResource)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT)
+import Control.Monad.Trans.Resource (MonadResource, MonadUnliftIO, ResourceT, runResourceT)
 import TestContainers.Trace (Tracer)
 
--- | Docker related functionality is parameterized over this `Monad`.
+-- | The heart and soul of the testcontainers library.
+--
+-- @since x.x.x
+newtype TestContainer a = TestContainer {unTestContainer :: ReaderT Config (ResourceT IO) a}
+  deriving newtype
+    ( Functor,
+      Applicative,
+      Monad,
+      MonadIO,
+      MonadUnliftIO,
+      MonadMask,
+      MonadCatch,
+      MonadThrow,
+      MonadResource,
+      MonadReader Config
+    )
+
+instance (Semigroup a) => Semigroup (TestContainer a) where
+  (<>) =
+    liftA2 (<>)
+
+instance (Monoid a) => Monoid (TestContainer a) where
+  mempty = pure mempty
+
+-- | Run a 'TestContainer' action. Any container spun up during the computation are guaranteed
+-- to be shutdown and cleaned up once this function returns.
+--
+-- @since x.x.x
+runTestContainer :: Config -> TestContainer a -> IO a
+runTestContainer config action =
+  runResourceT (runReaderT (unTestContainer action) config)
+
+-- | Docker related functionality is parameterized over this `Monad`. Since x.x.x this is
+-- just a type alias for @m ~ 'TestContainer'@.
 --
 -- @since 0.1.0.0
 type MonadDocker m =
-  ( MonadIO m,
-    MonadMask m,
-    MonadThrow m,
-    MonadCatch m,
-    MonadResource m,
-    MonadReader Config m
-  )
+  (m ~ TestContainer)
 
 -- | Configuration for defaulting behavior.
 --
