@@ -33,6 +33,7 @@ library
     TestContainers.Hspec
     TestContainers.Image
     TestContainers.Tasty
+    TestContainers.Trace
 
   -- other-modules:
   -- other-extensions:
