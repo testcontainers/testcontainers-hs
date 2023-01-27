@@ -1,26 +1,29 @@
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+
 module TestContainers.Hspec
-  (
-    -- * Running containers for tests
-    withContainers
+  ( -- * Running containers for tests
+    withContainers,
 
     -- * Re-exports for convenience
-  , module Reexports
-  ) where
+    module Reexports,
+  )
+where
 
-import           Control.Exception                     (bracket)
-import           Control.Monad.IO.Class                (liftIO)
-import           Control.Monad.Reader                  (runReaderT)
-import           Control.Monad.Trans.Resource          (InternalState,
-                                                        getInternalState)
-import           Control.Monad.Trans.Resource.Internal (stateAlloc,
-                                                        stateCleanup)
-import           Data.Acquire                          (ReleaseType (ReleaseNormal))
-
-import           TestContainers                        as Reexports
-
+import Control.Exception (bracket)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Reader (runReaderT)
+import Control.Monad.Trans.Resource
+  ( InternalState,
+    getInternalState,
+  )
+import Control.Monad.Trans.Resource.Internal
+  ( stateAlloc,
+    stateCleanup,
+  )
+import Data.Acquire (ReleaseType (ReleaseNormal))
+import TestContainers as Reexports
 
 -- | Allow `Hspec.Spec` to depend on Docker containers. Hspec takes care of
 -- initialization and de-initialization of the containers.
@@ -41,11 +44,11 @@ import           TestContainers                        as Reexports
 -- @
 --
 -- `withContainers` allows you naturally scope the handling of containers for your tests.
-withContainers
-  :: forall a
-  .  (forall m. MonadDocker m => m a)
-  -> (a -> IO ())
-  -> IO ()
+withContainers ::
+  forall a.
+  (forall m. (MonadDocker m) => m a) ->
+  (a -> IO ()) ->
+  IO ()
 withContainers startContainers = dropState $ bracket acquire release
   where
     runC action = do
@@ -54,11 +57,11 @@ withContainers startContainers = dropState $ bracket acquire release
 
     acquire :: IO (a, InternalState)
     acquire = runC $ do
-        result     <- startContainers
-        releaseMap <- getInternalState
+      result <- startContainers
+      releaseMap <- getInternalState
 
-        liftIO $ stateAlloc releaseMap
-        pure (result, releaseMap)
+      liftIO $ stateAlloc releaseMap
+      pure (result, releaseMap)
 
     release :: (a, InternalState) -> IO ()
     release (_, internalState) =
