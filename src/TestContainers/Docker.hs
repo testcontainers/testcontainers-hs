@@ -111,12 +111,12 @@ module TestContainers.Docker
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Exception (IOException, throw)
 import Control.Monad (replicateM, unless)
 import Control.Monad.Catch
   ( Exception,
+    MonadCatch,
     MonadThrow,
     bracket,
     throwM,
@@ -149,6 +149,7 @@ import qualified Data.Text.Lazy.Encoding as LazyText
 import GHC.Stack (withFrozenCallStack)
 import Network.HTTP.Client
   ( HttpException,
+    Manager,
     Request (..),
     defaultManagerSettings,
     defaultRequest,
@@ -222,7 +223,7 @@ data ContainerRequest = ContainerRequest
     links :: [ContainerId],
     naming :: NamingStrategy,
     rmOnExit :: Bool,
-    readiness :: Maybe WaitUntilReady
+    readiness :: WaitUntilReady
   }
 
 -- | Parameters for a naming a Docker container.
@@ -248,7 +249,7 @@ containerRequest image =
       network = Nothing,
       links = [],
       rmOnExit = True,
-      readiness = Nothing
+      readiness = mempty
     }
 
 -- | Set the name of a Docker container. This is equivalent to invoking @docker run@
@@ -354,7 +355,7 @@ setExpose newExpose req =
 -- @since 0.1.0.0
 setWaitingFor :: WaitUntilReady -> ContainerRequest -> ContainerRequest
 setWaitingFor newWaitingFor req =
-  req {readiness = Just newWaitingFor}
+  req {readiness = newWaitingFor}
 
 -- | Runs a Docker container from an `Image` and `ContainerRequest`. A finalizer
 -- is registered so that the container is aways stopped when it goes out of scope.
@@ -428,11 +429,8 @@ run request = do
           config
         }
 
-  case readiness of
-    Just wait ->
-      waitUntilReady container wait
-    Nothing ->
-      pure ()
+  -- Last but not least, execute the WaitUntilReady checks
+  waitUntilReady container readiness
 
   pure container
 
@@ -619,9 +617,31 @@ type ContainerId = Text
 -- Users to plug in their definition of readiness.
 --
 -- @since 0.1.0.0
-newtype WaitUntilReady = WaitUntilReady
-  { checkContainerReady :: Config -> Container -> (Maybe Int, TestContainer ())
-  }
+data WaitUntilReady
+  = -- | A blocking action that attests readiness
+    WaitReady
+      -- Check to run
+      (Container -> TestContainer ())
+  | -- | In order to keep readiness checking at bay this node
+    -- ensures checks are not exceeding their time share
+    WaitUntilTimeout
+      -- Timeout in seconds
+      Int
+      -- Action to watch with with timeout
+      WaitUntilReady
+  | WaitMany
+      -- First check
+      WaitUntilReady
+      -- Next check
+      WaitUntilReady
+
+-- | @since x.x.x
+instance Semigroup WaitUntilReady where
+  (<>) = WaitMany
+
+-- | @since x.x.x
+instance Monoid WaitUntilReady where
+  mempty = WaitReady mempty
 
 -- | The exception thrown by `waitForLine` in case the expected log line
 -- wasn't found.
@@ -652,52 +672,53 @@ instance Exception TimeoutException
 --
 -- @since 0.1.0.0
 waitUntilTimeout :: Int -> WaitUntilReady -> WaitUntilReady
-waitUntilTimeout seconds wait = WaitUntilReady $ \config container ->
-  case checkContainerReady wait config container of
-    (Nothing, check) ->
-      (Just seconds, check)
-    (Just innerTimeout, check)
-      | innerTimeout > seconds ->
-          (Just seconds, check)
-      | otherwise ->
-          (Just innerTimeout, check)
+waitUntilTimeout = WaitUntilTimeout
 
 -- | Waits for a specific http status code.
 -- This combinator should always be used with `waitUntilTimeout`.
 --
 -- @since 0.4.0.0
 waitForHttp ::
+  -- | Port
   Int ->
+  -- | URL path
   String ->
+  -- | Acceptable status codes
   [Int] ->
   WaitUntilReady
-waitForHttp port path acceptableStatusCodes = WaitUntilReady $ \config container ->
-  let Config {configTracer} = config
+waitForHttp port path acceptableStatusCodes = WaitReady $ \container -> do
+  Config {configTracer} <- ask
+  let wait :: (MonadIO m, MonadCatch m) => m ()
+      wait =
+        liftIO (newManager defaultManagerSettings) >>= retry
 
-      wait = newManager defaultManagerSettings >>= retry
+      retry :: (MonadIO m, MonadCatch m) => Manager -> m ()
       retry manager = do
         (endpointHost, endpointPort) <- containerAddress container port
-        let req =
+        let request =
               defaultRequest
                 { host = encodeUtf8 endpointHost,
                   port = endpointPort,
                   path = BSU.fromString path
                 }
-
-        result <- try $ statusCode . responseStatus <$> httpNoBody req manager
-        hasSucceeded <- case result of
+        result <-
+          try $
+            statusCode . responseStatus <$> liftIO (httpNoBody request manager)
+        case result of
           Right code -> do
             withTrace
               configTracer
               (TraceHttpCall endpointHost endpointPort (Right code))
-            pure $ code `elem` acceptableStatusCodes
+            unless (code `elem` acceptableStatusCodes) $
+              retry manager
           Left (exception :: HttpException) -> do
             withTrace
               configTracer
               (TraceHttpCall endpointHost endpointPort (Left $ show exception))
-            pure False
-        unless hasSucceeded $ threadDelay 500000 *> retry manager
-   in (Nothing, liftIO wait)
+            liftIO (threadDelay 500000)
+            retry manager
+
+  wait
 
 -- | Waits until the port of a container is ready to accept connections.
 -- This combinator should always be used with `waitUntilTimeout`.
@@ -706,11 +727,11 @@ waitForHttp port path acceptableStatusCodes = WaitUntilReady $ \config container
 waitUntilMappedPortReachable ::
   Int ->
   WaitUntilReady
-waitUntilMappedPortReachable port = WaitUntilReady $ \config container ->
-  withFrozenCallStack $
-    let Config {configTracer} = config
+waitUntilMappedPortReachable port = WaitReady $ \container -> do
+  withFrozenCallStack $ do
+    Config {configTracer} <- ask
 
-        resolve endpointHost endpointPort = do
+    let resolve endpointHost endpointPort = do
           let hints = Socket.defaultHints {Socket.addrSocketType = Socket.Stream}
           head <$> Socket.getAddrInfo (Just hints) (Just endpointHost) (Just (show endpointPort))
 
@@ -725,7 +746,7 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \config container ->
             (Socket.addrAddress addr)
           pure socket
 
-        retry = do
+        wait = do
           (endpointHost, endpointPort) <- containerAddress container port
 
           result <- try (resolve (unpack endpointHost) endpointPort >>= open)
@@ -739,8 +760,9 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \config container ->
                 configTracer
                 (TraceOpenSocket endpointHost endpointPort (Just exception))
               threadDelay 500000
-              retry
-     in (Nothing, liftIO retry)
+              wait
+
+    liftIO wait
 
 -- | A low-level primitive that allows scanning the logs for specific log lines
 -- that indicate readiness of a container.
@@ -750,10 +772,9 @@ waitUntilMappedPortReachable port = WaitUntilReady $ \config container ->
 --
 -- @since 0.1.0.0
 waitWithLogs :: (Container -> Handle -> Handle -> IO ()) -> WaitUntilReady
-waitWithLogs waiter = WaitUntilReady $ \_config container ->
-  let check = withLogs container $ \stdout stderr ->
-        liftIO $ waiter container stdout stderr
-   in (Nothing, check)
+waitWithLogs waiter = WaitReady $ \container ->
+  withLogs container $ \stdout stderr ->
+    liftIO $ waiter container stdout stderr
 
 -- | A data type indicating which pipe to scan for a specific log line.
 --
@@ -798,30 +819,35 @@ waitForLogLine whereToLook matches = waitWithLogs $ \Container {id} stdout stder
 -- | Blocks until the container is ready. `waitUntilReady` might throw exceptions
 -- depending on the used `WaitUntilReady` on the container.
 --
+-- In case the readiness check times out 'waitUntilReady' throws a 
+-- 'TimeoutException'.
+--
 -- @since 0.1.0.0
 waitUntilReady :: Container -> WaitUntilReady -> TestContainer ()
-waitUntilReady container@Container {id} waiter = do
-  config@Config {configDefaultWaitTimeout, configTracer} <- ask
-  let (timeoutInSeconds, check) =
-        checkContainerReady waiter config container
-
-      runAction action timeoutSeconds = do
-        withTrace configTracer (TraceWaitUntilReady timeoutSeconds)
-        action
-
-      withTimeout action = case timeoutInSeconds <|> configDefaultWaitTimeout of
-        Nothing ->
-          runAction action Nothing
-        Just seconds ->
+waitUntilReady container@Container {id} input = do
+  Config {configDefaultWaitTimeout} <- ask
+  interpreter $ case configDefaultWaitTimeout of
+    Just seconds -> waitUntilTimeout seconds input
+    Nothing -> input
+  where
+    interpreter :: WaitUntilReady -> TestContainer ()
+    interpreter wait =
+      case wait of
+        WaitReady check ->
+          check container
+        WaitUntilTimeout seconds rest ->
           withRunInIO $ \runInIO -> do
-            result <- timeout (seconds * 1000000) $ runInIO (runAction action (Just seconds))
+            result <-
+              timeout (seconds * 1000000) $
+                runInIO (interpreter rest)
             case result of
               Nothing ->
                 throwM $ TimeoutException {id}
-              Just _ ->
+              Just {} ->
                 pure ()
-
-  withTimeout check
+        WaitMany first second -> do
+          interpreter first
+          interpreter second
 
 -- | Handle to a Docker image.
 --
