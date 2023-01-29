@@ -532,8 +532,7 @@ type ImageTag = Text
 --
 -- @since 0.1.0.0
 data ToImage = ToImage
-  { runToImage :: TestContainer Image,
-    applyToContainerRequest :: ContainerRequest -> ContainerRequest
+  { runToImage :: TestContainer Image
   }
 
 -- | Build the `Image` referred to by the argument. If the construction of the
@@ -543,12 +542,11 @@ data ToImage = ToImage
 --
 -- @since 0.1.0.0
 build :: ToImage -> TestContainer ToImage
-build toImage@ToImage {applyToContainerRequest} = do
+build toImage = do
   image <- runToImage toImage
   return $
-    ToImage
-      { runToImage = pure image,
-        applyToContainerRequest
+    toImage
+      { runToImage = pure image
       }
 
 -- | Default `ToImage`. Doesn't apply anything to to `ContainerRequests`.
@@ -557,8 +555,7 @@ build toImage@ToImage {applyToContainerRequest} = do
 defaultToImage :: TestContainer Image -> ToImage
 defaultToImage action =
   ToImage
-    { runToImage = action,
-      applyToContainerRequest = \x -> x
+    { runToImage = action
     }
 
 -- | Get an `Image` from a tag.
