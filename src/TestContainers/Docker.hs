@@ -584,7 +584,7 @@ fromBuildContext ::
 fromBuildContext path mdockerfile = defaultToImage $ do
   let args
         | Just dockerfile <- mdockerfile =
-            ["build", "--quiet", "-f", pack dockerfile, pack path]
+            ["build", "--quiet", "--file", pack dockerfile, pack path]
         | otherwise =
             ["build", "--quiet", pack path]
   tracer <- askTracer
@@ -819,7 +819,7 @@ waitForLogLine whereToLook matches = waitWithLogs $ \Container {id} stdout stder
 -- | Blocks until the container is ready. `waitUntilReady` might throw exceptions
 -- depending on the used `WaitUntilReady` on the container.
 --
--- In case the readiness check times out 'waitUntilReady' throws a 
+-- In case the readiness check times out 'waitUntilReady' throws a
 -- 'TimeoutException'.
 --
 -- @since 0.1.0.0
