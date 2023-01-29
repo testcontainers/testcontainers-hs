@@ -4,7 +4,7 @@
 module TestContainers.TastySpec (main, test_all) where
 
 import Data.Text.Lazy (isInfixOf)
-import Test.Tasty
+import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
 import TestContainers.Tasty
   ( Pipe (Stdout),
@@ -41,7 +41,11 @@ containers1 = do
     run $
       containerRequest (fromTag "rabbitmq:3.8.4")
         & setRm False
-        & setWaitingFor (waitForLogLine Stdout (("completed with" `isInfixOf`)))
+        & setExpose [5672]
+        & setWaitingFor
+          ( waitForLogLine Stdout (("completed with" `isInfixOf`))
+              <> waitUntilMappedPortReachable 5672
+          )
 
   _nginx <-
     run $
