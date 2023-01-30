@@ -33,6 +33,9 @@ module TestContainers.Docker
     Image,
     imageTag,
 
+    -- * Port
+    Port (..),
+
     -- * Docker container
     ContainerId,
     Container,
@@ -141,11 +144,12 @@ import Data.Foldable (traverse_)
 import Data.Function ((&))
 import Data.List (find)
 import Data.String (IsString (..))
-import Data.Text (Text, pack, strip, unpack)
+import Data.Text (Text, pack, splitOn, strip, unpack)
 import Data.Text.Encoding (encodeUtf8)
 import Data.Text.Encoding.Error (lenientDecode)
 import qualified Data.Text.Lazy as LazyText
 import qualified Data.Text.Lazy.Encoding as LazyText
+import Data.Text.Read (decimal)
 import GHC.Stack (withFrozenCallStack)
 import Network.HTTP.Client
   ( HttpException,
@@ -217,7 +221,7 @@ data ContainerRequest = ContainerRequest
   { toImage :: ToImage,
     cmd :: Maybe [Text],
     env :: [(Text, Text)],
-    exposedPorts :: [Int],
+    exposedPorts :: [Port],
     volumeMounts :: [(Text, Text)],
     network :: Maybe Text,
     links :: [ContainerId],
@@ -333,6 +337,61 @@ setLink :: [ContainerId] -> ContainerRequest -> ContainerRequest
 setLink newLink req =
   req {links = newLink}
 
+-- | Defintion of a 'Port'. Allows for specifying ports using various protocols. Due to the
+-- 'Num' and 'IsString' instance allows for convenient Haskell literals.
+--
+-- >>> "80" :: Port
+-- 80/tcp
+--
+-- >>> "80/tcp" :: Port
+-- 80/tcp
+--
+-- >>> 80 :: Port
+-- 80/tcp
+--
+-- >>> "90/udp" :: Port
+-- 90/udp
+data Port = Port
+  { port :: Int,
+    protocol :: Text
+  }
+  deriving stock (Eq, Ord)
+
+defaultProtocol :: Text
+defaultProtocol = "tcp"
+
+-- @since x.x.x
+instance Show Port where
+  show Port {port, protocol} =
+    show port <> "/" <> unpack protocol
+
+-- | A cursed but handy instance supporting literal 'Port's.
+--
+-- @since x.x.x
+instance Num Port where
+  fromInteger x =
+    Port {port = fromIntegral x, protocol = defaultProtocol}
+  (+) = Prelude.error "not implemented"
+  (*) = Prelude.error "not implemented"
+  abs = Prelude.error "not implemented"
+  signum = Prelude.error "not implemented"
+  negate = Prelude.error "not implemented"
+
+-- | A cursed but handy instance supporting literal 'Port's of them
+-- form @"8080"@, @"8080/udp"@, @"8080/tcp"@.
+--
+-- @since x.x.x
+instance IsString Port where
+  fromString input = case splitOn "/" (pack input) of
+    [numberish]
+      | Right (port, "") <- decimal numberish ->
+          Port {port, protocol = defaultProtocol}
+    [numberish, protocol]
+      | Right (port, "") <- decimal numberish ->
+          Port {port, protocol}
+    _ ->
+      Prelude.error ("invalid port literal: " <> input)
+
 -- | Set exposed ports on the container. This is equivalent to setting @--publish $PORT@ to
 -- @docker run@. Docker assigns a random port for the host port. You will have to use `containerIp`
 -- and `containerPort` to connect to the published port.
@@ -344,7 +403,7 @@ setLink newLink req =
 -- @
 --
 -- @since 0.1.0.0
-setExpose :: [Int] -> ContainerRequest -> ContainerRequest
+setExpose :: [Port] -> ContainerRequest -> ContainerRequest
 setExpose newExpose req =
   req {exposedPorts = newExpose}
 
@@ -394,7 +453,7 @@ run request = do
             ++ [["--detach"]]
             ++ [["--name", containerName] | Just containerName <- [name]]
             ++ [["--env", variable <> "=" <> value] | (variable, value) <- env]
-            ++ [["--publish", pack (show port)] | port <- exposedPorts]
+            ++ [["--publish", pack (show port) <> "/" <> protocol] | Port {port, protocol} <- exposedPorts]
             ++ [["--network", networkName] | Just networkName <- [network]]
             ++ [["--link", container] | container <- links]
             ++ [["--volume", src <> ":" <> dest] | (src, dest) <- volumeMounts]
@@ -677,7 +736,7 @@ waitUntilTimeout = WaitUntilTimeout
 -- @since 0.4.0.0
 waitForHttp ::
   -- | Port
-  Int ->
+  Port ->
   -- | URL path
   String ->
   -- | Acceptable status codes
@@ -722,7 +781,7 @@ waitForHttp port path acceptableStatusCodes = WaitReady $ \container -> do
 --
 -- @since 0.1.0.0
 waitUntilMappedPortReachable ::
-  Int ->
+  Port ->
   WaitUntilReady
 waitUntilMappedPortReachable port = WaitReady $ \container -> do
   withFrozenCallStack $ do
@@ -971,12 +1030,12 @@ containerGateway Container {id, inspectOutput} =
 -- | Looks up an exposed port on the host.
 --
 -- @since 0.1.0.0
-containerPort :: Container -> Int -> Int
-containerPort Container {id, inspectOutput} port =
+containerPort :: Container -> Port -> Int
+containerPort Container {id, inspectOutput} Port {port, protocol} =
   let -- TODO also support UDP ports
       -- Using IsString so it works both with Text (aeson<2) and Aeson.Key (aeson>=2)
       textPort :: (IsString s) => s
-      textPort = fromString $ show port <> "/tcp"
+      textPort = fromString $ show port <> "/" <> unpack protocol
    in -- TODO be more mindful, make sure to grab the
       -- port from the right host address
 
@@ -1004,13 +1063,13 @@ containerPort Container {id, inspectOutput} port =
 -- 'containerAddress' will use the exposed port on the Docker host.
 --
 -- @since 0.4.0.0
-containerAddress :: (MonadIO m) => Container -> Int -> m (Text, Int)
-containerAddress container port = do
+containerAddress :: (MonadIO m) => Container -> Port -> m (Text, Int)
+containerAddress container Port {port, protocol} = do
   inDocker <- isRunningInDocker
   pure $
     if inDocker
       then (containerAlias container, port)
-      else ("localhost", containerPort container port)
+      else ("localhost", containerPort container (Port {port, protocol}))
 
 -- | Runs the `docker inspect` command. Memoizes the result.
 --
