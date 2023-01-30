@@ -29,6 +29,9 @@ module TestContainers
     M.setExpose,
     M.setWaitingFor,
 
+    -- * Port
+    M.Port (..),
+
     -- * Running Docker containers (@docker run@)
     M.Container,
     M.containerAlias,

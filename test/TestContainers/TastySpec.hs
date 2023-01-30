@@ -56,6 +56,13 @@ containers1 = do
               waitForHttp 80 "/" [200]
           )
 
+  _jaeger <-
+    run $
+      containerRequest (fromTag "jaegertracing/all-in-one:1.6")
+        & setExpose ["5775/udp", "6831/udp", "6832/udp", "5778", "16686/tcp"]
+        & setWaitingFor
+          (waitForHttp "16686/tcp" "/" [200])
+
   _test <- run $ containerRequest (fromBuildContext "./test/container1" Nothing)
 
   pure ()
