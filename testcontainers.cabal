@@ -30,6 +30,7 @@ library
   exposed-modules:
     TestContainers
     TestContainers.Docker
+    TestContainers.Docker.Internal
     TestContainers.Hspec
     TestContainers.Image
     TestContainers.Monad
