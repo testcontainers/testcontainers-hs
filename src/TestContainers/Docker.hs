@@ -140,7 +140,6 @@ import Data.Aeson (Value, decode')
 import qualified Data.Aeson.Optics as Optics
 import qualified Data.ByteString.Lazy.Char8 as LazyByteString
 import qualified Data.ByteString.UTF8 as BSU
-import Data.Foldable (traverse_)
 import Data.Function ((&))
 import Data.List (find)
 import Data.String (IsString (..))
@@ -167,12 +166,17 @@ import Optics.Fold (pre)
 import Optics.Operators ((^?))
 import Optics.Optic ((%))
 import System.Directory (doesFileExist)
-import System.Exit (ExitCode (..))
 import System.IO (Handle, hClose)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified System.Process as Process
 import qualified System.Random as Random
 import System.Timeout (timeout)
+import TestContainers.Docker.Internal
+  ( ContainerId,
+    DockerException (..),
+    docker,
+    dockerWithStdin,
+  )
 import TestContainers.Monad
   ( Config (..),
     MonadDocker,
@@ -184,35 +188,6 @@ import TestContainers.Monad
 import TestContainers.Trace (Trace (..), Tracer, newTracer, withTrace)
 import Prelude hiding (error, id)
 import qualified Prelude
-
--- | Failing to interact with Docker results in this exception
--- being thrown.
---
--- @since 0.1.0.0
-data DockerException
-  = DockerException
-      { -- | Exit code of the underlying Docker process.
-        exitCode :: ExitCode,
-        -- | Arguments that were passed to Docker.
-        args :: [Text],
-        -- | Docker's STDERR output.
-        stderr :: Text
-      }
-  | InspectUnknownContainerId {id :: ContainerId}
-  | InspectOutputInvalidJSON {id :: ContainerId}
-  | InspectOutputMissingNetwork {id :: ContainerId}
-  | InspectOutputUnexpected {id :: ContainerId}
-  | UnknownPortMapping
-      { -- | Id of the `Container` that we tried to lookup the
-        -- port mapping.
-        id :: ContainerId,
-        -- | Textual representation of port mapping we were
-        -- trying to look up.
-        port :: Text
-      }
-  deriving (Eq, Show)
-
-instance Exception DockerException
 
 -- | Parameters for a running a Docker container.
 --
@@ -493,42 +468,6 @@ run request = do
 
   pure container
 
--- | Internal function that runs Docker. Takes care of throwing an exception
--- in case of failure.
---
--- @since 0.1.0.0
-docker :: (MonadIO m) => Tracer -> [Text] -> m String
-docker tracer args =
-  dockerWithStdin tracer args ""
-
--- | Internal function that runs Docker. Takes care of throwing an exception
--- in case of failure.
---
--- @since 0.1.0.0
-dockerWithStdin :: (MonadIO m) => Tracer -> [Text] -> Text -> m String
-dockerWithStdin tracer args stdin = liftIO $ do
-  (exitCode, stdout, stderr) <-
-    Process.readProcessWithExitCode
-      "docker"
-      (map unpack args)
-      (unpack stdin)
-
-  withTrace tracer (TraceDockerInvocation args stdin exitCode)
-
-  -- TODO output these concurrently with the process
-  traverse_ (withTrace tracer . TraceDockerStdout . pack) (lines stdout)
-  traverse_ (withTrace tracer . TraceDockerStderr . pack) (lines stderr)
-
-  case exitCode of
-    ExitSuccess -> pure stdout
-    _ ->
-      throwM $
-        DockerException
-          { exitCode,
-            args,
-            stderr = pack stderr
-          }
-
 -- | Kills a Docker container. `kill` is essentially @docker kill@.
 --
 -- @since 0.1.0.0
@@ -663,11 +602,6 @@ fromDockerfile dockerfile = defaultToImage $ do
     Image
       { tag = strip (pack output)
       }
-
--- | Identifies a container within the Docker runtime. Assigned by @docker run@.
---
--- @since 0.1.0.0
-type ContainerId = Text
 
 -- | A strategy that describes how to asses readiness of a `Container`. Allows
 -- Users to plug in their definition of readiness.
