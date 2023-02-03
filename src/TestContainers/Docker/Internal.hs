@@ -1,21 +1,34 @@
-{-# LANGUAGE OverloadedStrings, NamedFieldPuns #-}
-module TestContainers.Docker.Internal (
-    ContainerId, 
-    DockerException(..),
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+module TestContainers.Docker.Internal
+  ( DockerException (..),
+
+    -- * Container related stuff
+    ContainerId,
+
+    -- * Network related stuff
+    NetworkId,
 
     -- * Running docker
     docker,
-    dockerWithStdin
-) where 
+    dockerWithStdin,
+  )
+where
 
-import Control.Monad.Catch (throwM)
-import Data.Foldable (traverse_)
-import qualified System.Process as Process
 import Control.Exception (Exception)
+import Control.Monad.Catch (throwM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import TestContainers.Trace (Tracer, Trace(..), withTrace)
-import Data.Text (Text, unpack, pack)
-import System.Exit (ExitCode(..))
+import Data.Foldable (traverse_)
+import Data.Text (Text, pack, unpack)
+import System.Exit (ExitCode (..))
+import qualified System.Process as Process
+import TestContainers.Trace (Trace (..), Tracer, withTrace)
+
+-- | Identifies a network within the Docker runtime. Assigned by @docker network create@
+--
+-- @since x.x.x
+type NetworkId = Text
 
 -- | Identifies a container within the Docker runtime. Assigned by @docker run@.
 --

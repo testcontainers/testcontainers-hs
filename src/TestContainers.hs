@@ -25,9 +25,22 @@ module TestContainers
     M.setRm,
     M.setEnv,
     M.setNetwork,
+    M.withNetwork,
+    M.withNetworkAlias,
     M.setLink,
     M.setExpose,
     M.setWaitingFor,
+
+    -- * @docker network@ parameters
+    M.NetworkRequest,
+    M.defaultNetworkRequest,
+    M.withDriver,
+    M.withIpv6,
+
+    -- * Creating networks
+    M.Network,
+    M.NetworkId,
+    M.createNetwork,
 
     -- * Port
     M.Port (..),

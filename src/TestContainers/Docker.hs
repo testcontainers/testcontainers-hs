@@ -70,10 +70,22 @@ module TestContainers.Docker
     setRm,
     setEnv,
     setNetwork,
+    withNetwork,
+    withNetworkAlias,
     setLink,
     setExpose,
     setWaitingFor,
     run,
+
+    -- * Network related functionality
+    NetworkId,
+    Network,
+    NetworkRequest,
+    networkId,
+    defaultNetworkRequest,
+    createNetwork,
+    withIpv6,
+    withDriver,
 
     -- * Managing the container lifecycle
     InspectOutput,
@@ -177,6 +189,16 @@ import TestContainers.Docker.Internal
     docker,
     dockerWithStdin,
   )
+import TestContainers.Docker.Network
+  ( Network,
+    NetworkId,
+    NetworkRequest,
+    createNetwork,
+    defaultNetworkRequest,
+    networkId,
+    withDriver,
+    withIpv6,
+  )
 import TestContainers.Monad
   ( Config (..),
     MonadDocker,
@@ -198,7 +220,8 @@ data ContainerRequest = ContainerRequest
     env :: [(Text, Text)],
     exposedPorts :: [Port],
     volumeMounts :: [(Text, Text)],
-    network :: Maybe Text,
+    network :: Maybe (Either Network Text),
+    networkAlias :: Maybe Text,
     links :: [ContainerId],
     naming :: NamingStrategy,
     rmOnExit :: Bool,
@@ -226,6 +249,7 @@ containerRequest image =
       exposedPorts = [],
       volumeMounts = [],
       network = Nothing,
+      networkAlias = Nothing,
       links = [],
       rmOnExit = True,
       readiness = mempty
@@ -302,7 +326,23 @@ setEnv newEnv req =
 -- @since 0.4.0.0
 setNetwork :: Text -> ContainerRequest -> ContainerRequest
 setNetwork networkName req =
-  req {network = Just networkName}
+  req {network = Just (Right networkName)}
+
+-- | Set the network the container will connect to. This is equivalent to passing
+-- @--network network_name@ to @docker run@.
+--
+-- @since x.x.x
+withNetwork :: Network -> ContainerRequest -> ContainerRequest
+withNetwork network req =
+  req {network = Just (Left network)}
+
+-- | Set the network alias for this container. This is equivalent to passing
+-- @--network-alias alias@ to @docker run@.
+--
+-- @since x.x.x
+withNetworkAlias :: Text -> ContainerRequest -> ContainerRequest
+withNetworkAlias alias req =
+  req {networkAlias = Just alias}
 
 -- | Set link on the container. This is equivalent to passing @--link other_container@
 -- to @docker run@.
@@ -406,6 +446,7 @@ run request = do
           exposedPorts,
           volumeMounts,
           network,
+          networkAlias,
           links,
           rmOnExit,
           readiness
@@ -429,7 +470,9 @@ run request = do
             ++ [["--name", containerName] | Just containerName <- [name]]
             ++ [["--env", variable <> "=" <> value] | (variable, value) <- env]
             ++ [["--publish", pack (show port) <> "/" <> protocol] | Port {port, protocol} <- exposedPorts]
-            ++ [["--network", networkName] | Just networkName <- [network]]
+            ++ [["--network", networkName] | Just (Right networkName) <- [network]]
+            ++ [["--network", networkId dockerNetwork] | Just (Left dockerNetwork) <- [network]]
+            ++ [["--network-alias", alias] | Just alias <- [networkAlias]]
             ++ [["--link", container] | container <- links]
             ++ [["--volume", src <> ":" <> dest] | (src, dest) <- volumeMounts]
             ++ [["--rm"] | rmOnExit]
