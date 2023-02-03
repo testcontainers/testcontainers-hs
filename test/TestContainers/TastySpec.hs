@@ -10,6 +10,8 @@ import TestContainers.Tasty
   ( Pipe (Stdout),
     TestContainer,
     containerRequest,
+    createNetwork,
+    defaultNetworkRequest,
     fromBuildContext,
     fromTag,
     redis,
@@ -22,16 +24,21 @@ import TestContainers.Tasty
     waitUntilMappedPortReachable,
     waitUntilTimeout,
     withContainers,
+    withNetwork,
     (&),
   )
 
 containers1 ::
   TestContainer ()
 containers1 = do
+  net <-
+    createNetwork defaultNetworkRequest
+
   _redisContainer <-
     run $
       containerRequest redis
         & setExpose [6379]
+        & withNetwork net
         & setWaitingFor
           ( waitUntilTimeout 30 $
               waitUntilMappedPortReachable 6379
@@ -42,6 +49,7 @@ containers1 = do
       containerRequest (fromTag "rabbitmq:3.8.4")
         & setRm False
         & setExpose [5672]
+        & withNetwork net
         & setWaitingFor
           ( waitForLogLine Stdout (("completed with" `isInfixOf`))
               <> waitUntilMappedPortReachable 5672
@@ -51,6 +59,7 @@ containers1 = do
     run $
       containerRequest (fromTag "nginx:1.23.1-alpine")
         & setExpose [80]
+        & withNetwork net
         & setWaitingFor
           ( waitUntilTimeout 30 $
               waitForHttp 80 "/" [200]
@@ -60,6 +69,7 @@ containers1 = do
     run $
       containerRequest (fromTag "jaegertracing/all-in-one:1.6")
         & setExpose ["5775/udp", "6831/udp", "6832/udp", "5778", "16686/tcp"]
+        & withNetwork net
         & setWaitingFor
           (waitForHttp "16686/tcp" "/" [200])
 
