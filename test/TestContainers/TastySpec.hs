@@ -20,8 +20,10 @@ import TestContainers.Tasty
     setExpose,
     setRm,
     setWaitingFor,
+    successfulExit,
     waitForHttp,
     waitForLogLine,
+    waitForState,
     waitUntilMappedPortReachable,
     waitUntilTimeout,
     withContainers,
@@ -75,6 +77,11 @@ containers1 = do
         & withNetwork net
         & setWaitingFor
           (waitForHttp "16686/tcp" "/" [200])
+
+  _helloWorld <-
+    run $
+      containerRequest (fromTag "hello-world:latest")
+        & setWaitingFor (waitForState successfulExit)
 
   _test <- run $ containerRequest (fromBuildContext "./test/container1" Nothing)
 

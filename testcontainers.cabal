@@ -34,6 +34,7 @@ library
     TestContainers.Docker.Internal
     TestContainers.Docker.Network
     TestContainers.Docker.Reaper
+    TestContainers.Docker.State
     TestContainers.Hspec
     TestContainers.Image
     TestContainers.Monad

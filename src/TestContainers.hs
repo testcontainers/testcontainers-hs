@@ -77,6 +77,21 @@ module TestContainers
     -- ** Timeout for readiness checks
     M.waitUntilTimeout,
 
+    -- ** Wait for container exit
+    M.State,
+    M.Status (..),
+    M.stateError,
+    M.stateExitCode,
+    M.stateFinishedAt,
+    M.stateOOMKilled,
+    M.statePid,
+    M.stateStartedAt,
+    M.stateStatus,
+    M.waitForState,
+
+    -- ** Predicates to assert container state
+    M.successfulExit,
+
     -- ** Waiting on particular log lines
     M.Pipe (..),
     M.waitWithLogs,
