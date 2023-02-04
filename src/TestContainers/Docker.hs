@@ -61,6 +61,7 @@ module TestContainers.Docker
     -- * Running containers
     ContainerRequest,
     containerRequest,
+    withLabels,
     setName,
     setFixedName,
     setSuffixedName,
@@ -119,6 +120,9 @@ module TestContainers.Docker
     -- * Wait until the http server responds with a specific status code
     waitForHttp,
 
+    -- * Reaper
+    createRyukReaper,
+
     -- * Reexports for convenience
     ResIO,
     runResourceT,
@@ -139,11 +143,10 @@ import Control.Monad.Catch
   )
 import Control.Monad.Fix (mfix)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.IO.Unlift (MonadUnliftIO (withRunInIO))
+import Control.Monad.IO.Unlift (MonadUnliftIO (withRunInIO), askRunInIO)
 import Control.Monad.Reader (MonadReader (..))
 import Control.Monad.Trans.Resource
-  ( MonadResource (liftResourceT),
-    ReleaseKey,
+  ( ReleaseKey,
     ResIO,
     register,
     runResourceT,
@@ -183,6 +186,11 @@ import System.IO.Unsafe (unsafePerformIO)
 import qualified System.Process as Process
 import qualified System.Random as Random
 import System.Timeout (timeout)
+import TestContainers.Config
+  ( Config (..),
+    defaultDockerConfig,
+    determineConfig,
+  )
 import TestContainers.Docker.Internal
   ( ContainerId,
     DockerException (..),
@@ -194,18 +202,21 @@ import TestContainers.Docker.Network
     NetworkId,
     NetworkRequest,
     createNetwork,
-    networkRequest,
     networkId,
+    networkRequest,
     withDriver,
     withIpv6,
   )
+import TestContainers.Docker.Reaper
+  ( Reaper,
+    newRyukReaper,
+    reaperLabels,
+    ryukImageTag,
+    ryukPort,
+  )
 import TestContainers.Monad
-  ( Config (..),
-    MonadDocker,
+  ( MonadDocker,
     TestContainer,
-    defaultDockerConfig,
-    determineConfig,
-    runTestContainer,
   )
 import TestContainers.Trace (Trace (..), Tracer, newTracer, withTrace)
 import Prelude hiding (error, id)
@@ -225,7 +236,9 @@ data ContainerRequest = ContainerRequest
     links :: [ContainerId],
     naming :: NamingStrategy,
     rmOnExit :: Bool,
-    readiness :: WaitUntilReady
+    readiness :: WaitUntilReady,
+    labels :: [(Text, Text)],
+    noReaper :: Bool
   }
 
 -- | Parameters for a naming a Docker container.
@@ -251,8 +264,10 @@ containerRequest image =
       network = Nothing,
       networkAlias = Nothing,
       links = [],
-      rmOnExit = True,
-      readiness = mempty
+      rmOnExit = False,
+      readiness = mempty,
+      labels = mempty,
+      noReaper = False
     }
 
 -- | Set the name of a Docker container. This is equivalent to invoking @docker run@
@@ -343,6 +358,13 @@ withNetwork network req =
 withNetworkAlias :: Text -> ContainerRequest -> ContainerRequest
 withNetworkAlias alias req =
   req {networkAlias = Just alias}
+
+-- | Sets labels for a container
+--
+-- @since x.x.x
+withLabels :: [(Text, Text)] -> ContainerRequest -> ContainerRequest
+withLabels xs request =
+  request {labels = xs}
 
 -- | Set link on the container. This is equivalent to passing @--link other_container@
 -- to @docker run@.
@@ -449,8 +471,19 @@ run request = do
           networkAlias,
           links,
           rmOnExit,
-          readiness
+          readiness,
+          labels,
+          noReaper
         } = request
+
+  config@Config {configTracer, configCreateReaper} <-
+    ask
+
+  additionalLabels <-
+    if noReaper
+      then do
+        pure []
+      else reaperLabels <$> configCreateReaper
 
   image@Image {tag} <- runToImage toImage
 
@@ -468,6 +501,7 @@ run request = do
           [["run"]]
             ++ [["--detach"]]
             ++ [["--name", containerName] | Just containerName <- [name]]
+            ++ [["--label", label <> "=" <> value] | (label, value) <- additionalLabels ++ labels]
             ++ [["--env", variable <> "=" <> value] | (variable, value) <- env]
             ++ [["--publish", pack (show port) <> "/" <> protocol] | Port {port, protocol} <- exposedPorts]
             ++ [["--network", networkName] | Just (Right networkName) <- [network]]
@@ -478,8 +512,6 @@ run request = do
             ++ [["--rm"] | rmOnExit]
             ++ [[tag]]
             ++ [command | Just command <- [cmd]]
-
-  config@Config {configTracer} <- ask
 
   stdout <- docker configTracer dockerRun
 
@@ -493,11 +525,18 @@ run request = do
         unsafePerformIO $
           internalInspect configTracer id
 
-  container <- liftResourceT $ mfix $ \container -> do
-    -- Note: We have to tie the knot as the resulting container
-    -- carries the release key as well.
-    releaseKey <- register $ runTestContainer config (stop container)
-    pure $
+  container <- mfix $ \container -> do
+    -- If there is no reaper running just yet we start a new reaper instance.
+    releaseKey <-
+      if noReaper
+        then do
+          runInIO <- askRunInIO
+          register $
+            runInIO (stop container)
+        else do
+          register (pure ())
+
+    pure
       Container
         { id,
           releaseKey,
@@ -510,6 +549,33 @@ run request = do
   waitUntilReady container readiness
 
   pure container
+
+-- | Sets up a Ryuk 'Reaper'.
+--
+-- @since x.x.x
+createRyukReaper :: TestContainer Reaper
+createRyukReaper = do
+  ryukContainer <-
+    run $
+      containerRequest (fromTag ryukImageTag)
+        & skipReaper
+        & setVolumeMounts [("/var/run/docker.sock", "/var/run/docker.sock")]
+        & setExpose [ryukPort]
+        & setWaitingFor (waitUntilMappedPortReachable ryukPort)
+        & setRm True
+
+  (ryukContainerAddress, ryukContainerPort) <-
+    containerAddress ryukContainer ryukPort
+
+  newRyukReaper ryukContainerAddress ryukContainerPort
+
+-- | Internal attribute, serving as a loop breaker: When runnign a container
+-- we ensure a 'Reaper' is present, since the 'Reaper' itself is a running
+-- container we need to break the loop to avoid spinning up a new 'Reaper' for
+-- the 'Reaper'.
+skipReaper :: ContainerRequest -> ContainerRequest
+skipReaper request =
+  request {noReaper = True}
 
 -- | Kills a Docker container. `kill` is essentially @docker kill@.
 --
