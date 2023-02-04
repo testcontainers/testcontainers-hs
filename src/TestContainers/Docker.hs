@@ -48,6 +48,20 @@ module TestContainers.Docker
     containerAddress,
     containerReleaseKey,
 
+    -- * Container state
+    State,
+    Status (..),
+    stateError,
+    stateExitCode,
+    stateFinishedAt,
+    stateOOMKilled,
+    statePid,
+    stateStartedAt,
+    stateStatus,
+
+    -- * Predicates to assert container state
+    successfulExit,
+
     -- * Referring to images
     ToImage,
     fromTag,
@@ -109,6 +123,9 @@ module TestContainers.Docker
     TimeoutException (..),
     waitUntilTimeout,
 
+    -- * Wait for container state
+    waitForState,
+
     -- * Wait until a specific pattern appears in the logs
     waitWithLogs,
     Pipe (..),
@@ -156,7 +173,7 @@ import Control.Monad.Trans.Resource
     register,
     runResourceT,
   )
-import Data.Aeson (Value, decode')
+import Data.Aeson (decode')
 import qualified Data.Aeson.Optics as Optics
 import qualified Data.ByteString.Lazy.Char8 as LazyByteString
 import qualified Data.ByteString.UTF8 as BSU
@@ -199,6 +216,7 @@ import TestContainers.Config
 import TestContainers.Docker.Internal
   ( ContainerId,
     DockerException (..),
+    InspectOutput,
     LogConsumer,
     Pipe (..),
     consoleLogConsumer,
@@ -222,6 +240,18 @@ import TestContainers.Docker.Reaper
     reaperLabels,
     ryukImageTag,
     ryukPort,
+  )
+import TestContainers.Docker.State
+  ( State,
+    Status (..),
+    containerState,
+    stateError,
+    stateExitCode,
+    stateFinishedAt,
+    stateOOMKilled,
+    statePid,
+    stateStartedAt,
+    stateStatus,
   )
 import TestContainers.Monad
   ( MonadDocker,
@@ -787,6 +817,53 @@ newtype TimeoutException = TimeoutException
 
 instance Exception TimeoutException
 
+-- | The exception thrown by `waitForState`.
+--
+-- @since 0.1.0.0
+newtype InvalidStateException = InvalidStateException
+  { -- | The id of the underlying container that was not ready in time.
+    id :: ContainerId
+  }
+  deriving stock (Eq, Show)
+
+instance Exception InvalidStateException
+
+-- | @waitForState@ waits for a certain state of the container. If the container reaches a terminal
+-- state 'InvalidStateException' will be thrown.
+--
+-- @since x.x.x
+waitForState :: (State -> Bool) -> WaitUntilReady
+waitForState isReady = WaitReady $ \Container {id} -> do
+  let wait = do
+        Config {configTracer} <-
+          ask
+        inspectOutput <-
+          internalInspect configTracer id
+
+        let state = containerState inspectOutput
+
+        if isReady state
+          then pure ()
+          else do
+            case stateStatus state of
+              Exited ->
+                -- Once exited, state won't change!
+                throwM InvalidStateException {id}
+              Dead ->
+                -- Once dead, state won't change!
+                throwM InvalidStateException {id}
+              _ -> do
+                liftIO (threadDelay 500000)
+                wait
+  wait
+
+-- | @successfulExit@ is supposed to be used in conjunction with 'waitForState'.
+--
+-- @since x.x.x
+successfulExit :: State -> Bool
+successfulExit state =
+  stateStatus state == Exited && stateExitCode state == Just 0
+
 -- | @waitUntilTimeout n waitUntilReady@ waits @n@ seconds for the container
 -- to be ready. If the container is not ready by then a `TimeoutException` will
 -- be thrown.
@@ -992,11 +1069,6 @@ data Container = Container
     -- | Memoized output of `docker inspect`. This is being calculated lazily.
     inspectOutput :: InspectOutput
   }
-
--- | The parsed JSON output of docker inspect command.
---
--- @since 0.1.0.0
-type InspectOutput = Value
 
 -- | Returns the id of the container.
 --

@@ -7,6 +7,7 @@ module TestContainers.Docker.Internal
 
     -- * Container related stuff
     ContainerId,
+    InspectOutput,
 
     -- * Network related stuff
     NetworkId,
@@ -29,6 +30,7 @@ import Control.Monad (forever)
 import Control.Monad.Catch (throwM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadResource, allocate)
+import Data.Aeson (Value)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Foldable (traverse_)
@@ -47,6 +49,11 @@ type NetworkId = Text
 --
 -- @since 0.1.0.0
 type ContainerId = Text
+
+-- | The parsed JSON output of docker inspect command.
+--
+-- @since 0.1.0.0
+type InspectOutput = Value
 
 -- | Failing to interact with Docker results in this exception
 -- being thrown.
