@@ -12,7 +12,7 @@ module TestContainers.Docker.Network
     -- * Creating networks
     createNetwork,
     NetworkRequest,
-    defaultNetworkRequest,
+    networkRequest,
     withDriver,
     withIpv6,
   )
@@ -52,8 +52,8 @@ data NetworkRequest = NetworkRequest
 -- | Default parameters for creating a new Docker network.
 --
 -- @since x.x.x
-defaultNetworkRequest :: NetworkRequest
-defaultNetworkRequest =
+networkRequest :: NetworkRequest
+networkRequest =
   NetworkRequest
     { ipv6 = False,
       driver = Nothing

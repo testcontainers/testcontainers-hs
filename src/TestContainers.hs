@@ -33,7 +33,7 @@ module TestContainers
 
     -- * @docker network@ parameters
     M.NetworkRequest,
-    M.defaultNetworkRequest,
+    M.networkRequest,
     M.withDriver,
     M.withIpv6,
 

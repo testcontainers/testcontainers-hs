@@ -11,7 +11,7 @@ import TestContainers.Tasty
     TestContainer,
     containerRequest,
     createNetwork,
-    defaultNetworkRequest,
+    networkRequest,
     fromBuildContext,
     fromTag,
     redis,
@@ -32,7 +32,7 @@ containers1 ::
   TestContainer ()
 containers1 = do
   net <-
-    createNetwork defaultNetworkRequest
+    createNetwork networkRequest
 
   _redisContainer <-
     run $
