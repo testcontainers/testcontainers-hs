@@ -25,6 +25,8 @@ data Trace
     --   TraceDockerInvocation args stdin exitcode
     -- @
     TraceDockerInvocation [Text] Text ExitCode -- docker [args] [stdin]
+  | -- | Preparations to follow the logs for a certain container
+    TraceDockerFollowLogs [Text] -- docker [args]
   | -- | Line written to STDOUT by a Docker process.
     TraceDockerStdout Text
   | -- | Line written to STDERR by a Docker process.

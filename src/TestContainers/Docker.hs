@@ -78,6 +78,11 @@ module TestContainers.Docker
     setWaitingFor,
     run,
 
+    -- * Following logs
+    LogConsumer,
+    consoleLogConsumer,
+    withFollowLogs,
+
     -- * Network related functionality
     NetworkId,
     Network,
@@ -106,8 +111,8 @@ module TestContainers.Docker
 
     -- * Wait until a specific pattern appears in the logs
     waitWithLogs,
-    UnexpectedEndOfPipe (..),
     Pipe (..),
+    UnexpectedEndOfPipe (..),
     waitForLogLine,
 
     -- * Misc. Docker functions
@@ -132,7 +137,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (IOException, throw)
-import Control.Monad (replicateM, unless)
+import Control.Monad (forM_, replicateM, unless)
 import Control.Monad.Catch
   ( Exception,
     MonadCatch,
@@ -194,7 +199,11 @@ import TestContainers.Config
 import TestContainers.Docker.Internal
   ( ContainerId,
     DockerException (..),
+    LogConsumer,
+    Pipe (..),
+    consoleLogConsumer,
     docker,
+    dockerFollowLogs,
     dockerWithStdin,
   )
 import TestContainers.Docker.Network
@@ -238,7 +247,8 @@ data ContainerRequest = ContainerRequest
     rmOnExit :: Bool,
     readiness :: WaitUntilReady,
     labels :: [(Text, Text)],
-    noReaper :: Bool
+    noReaper :: Bool,
+    followLogs :: Maybe LogConsumer
   }
 
 -- | Parameters for a naming a Docker container.
@@ -267,7 +277,8 @@ containerRequest image =
       rmOnExit = False,
       readiness = mempty,
       labels = mempty,
-      noReaper = False
+      noReaper = False,
+      followLogs = Nothing
     }
 
 -- | Set the name of a Docker container. This is equivalent to invoking @docker run@
@@ -374,6 +385,13 @@ setLink :: [ContainerId] -> ContainerRequest -> ContainerRequest
 setLink newLink req =
   req {links = newLink}
 
+-- | Forwards container logs to the given 'LogConsumer' once ran.
+--
+-- @since x.x.x
+withFollowLogs :: LogConsumer -> ContainerRequest -> ContainerRequest
+withFollowLogs logConsumer request =
+  request {followLogs = Just logConsumer}
+
 -- | Defintion of a 'Port'. Allows for specifying ports using various protocols. Due to the
 -- 'Num' and 'IsString' instance allows for convenient Haskell literals.
 --
@@ -473,7 +491,8 @@ run request = do
           rmOnExit,
           readiness,
           labels,
-          noReaper
+          noReaper,
+          followLogs
         } = request
 
   config@Config {configTracer, configCreateReaper} <-
@@ -535,6 +554,9 @@ run request = do
             runInIO (stop container)
         else do
           register (pure ())
+
+    forM_ followLogs $
+      dockerFollowLogs configTracer id
 
     pure
       Container
@@ -874,16 +896,6 @@ waitWithLogs :: (Container -> Handle -> Handle -> IO ()) -> WaitUntilReady
 waitWithLogs waiter = WaitReady $ \container ->
   withLogs container $ \stdout stderr ->
     liftIO $ waiter container stdout stderr
-
--- | A data type indicating which pipe to scan for a specific log line.
---
--- @since 0.1.0.0
-data Pipe
-  = -- | Refer to logs on STDOUT.
-    Stdout
-  | -- | Refer to logs on STDERR.
-    Stderr
-  deriving (Eq, Ord, Show)
 
 -- | Waits for a specific line to occur in the logs. Throws a `UnexpectedEndOfPipe`
 -- exception in case the desired line can not be found on the logs.

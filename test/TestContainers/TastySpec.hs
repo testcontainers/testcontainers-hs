@@ -9,6 +9,7 @@ import Test.Tasty.HUnit
 import TestContainers.Tasty
   ( Pipe (Stdout),
     TestContainer,
+    consoleLogConsumer,
     containerRequest,
     createNetwork,
     fromBuildContext,
@@ -24,6 +25,7 @@ import TestContainers.Tasty
     waitUntilMappedPortReachable,
     waitUntilTimeout,
     withContainers,
+    withFollowLogs,
     withNetwork,
     (&),
   )
@@ -50,6 +52,7 @@ containers1 = do
         & setRm False
         & setExpose [5672]
         & withNetwork net
+        & withFollowLogs consoleLogConsumer
         & setWaitingFor
           ( waitForLogLine Stdout (("completed with" `isInfixOf`))
               <> waitUntilMappedPortReachable 5672

@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -13,15 +14,27 @@ module TestContainers.Docker.Internal
     -- * Running docker
     docker,
     dockerWithStdin,
+
+    -- * Following logs
+    Pipe (..),
+    LogConsumer,
+    consoleLogConsumer,
+    dockerFollowLogs,
   )
 where
 
+import qualified Control.Concurrent.Async as Async
 import Control.Exception (Exception)
+import Control.Monad (forever)
 import Control.Monad.Catch (throwM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Trans.Resource (MonadResource, allocate)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as ByteString
 import Data.Foldable (traverse_)
 import Data.Text (Text, pack, unpack)
 import System.Exit (ExitCode (..))
+import qualified System.IO
 import qualified System.Process as Process
 import TestContainers.Trace (Trace (..), Tracer, withTrace)
 
@@ -99,3 +112,71 @@ dockerWithStdin tracer args stdin = liftIO $ do
             args,
             stderr = pack stderr
           }
+
+-- | A data type indicating which pipe to scan for a specific log line.
+--
+-- @since 0.1.0.0
+data Pipe
+  = -- | Refer to logs on STDOUT.
+    Stdout
+  | -- | Refer to logs on STDERR.
+    Stderr
+  deriving stock (Eq, Ord, Show)
+
+-- | An abstraction for forwarding logs.
+--
+-- @since x.x.x
+type LogConsumer = Pipe -> ByteString -> IO ()
+
+-- | A simple 'LogConsumer' that writes log lines to stdout and stderr respectively.
+--
+-- @since x.x.x
+consoleLogConsumer :: LogConsumer
+consoleLogConsumer pipe line = do
+  case pipe of
+    Stdout -> do
+      ByteString.hPutStr System.IO.stdout line
+      ByteString.hPut System.IO.stdout (ByteString.singleton 0x0a)
+    Stderr -> do
+      ByteString.hPutStr System.IO.stderr line
+      ByteString.hPut System.IO.stderr (ByteString.singleton 0x0a)
+
+-- | Forwards container logs to a 'LogConsumer'. This is equivalent of calling @docker logs containerId --follow@
+--
+-- @since x.x.x
+dockerFollowLogs :: (MonadResource m) => Tracer -> ContainerId -> LogConsumer -> m ()
+dockerFollowLogs tracer containerId logConsumer = do
+  let dockerArgs =
+        ["logs", containerId, "--follow"]
+
+  (_releaseKey, _result) <-
+    allocate
+      ( do
+          process@(_stdin, Just stdout, Just stderr, _processHandle) <-
+            Process.createProcess $
+              (Process.proc "docker" (map unpack dockerArgs))
+                { Process.std_out = Process.CreatePipe,
+                  Process.std_err = Process.CreatePipe
+                }
+
+          withTrace tracer (TraceDockerFollowLogs dockerArgs)
+
+          stdoutReporter <- Async.async $ do
+            forever $ do
+              line <- ByteString.hGetLine stdout
+              logConsumer Stdout line
+
+          stderrReporter <- Async.async $ do
+            forever $ do
+              line <- ByteString.hGetLine stderr
+              logConsumer Stderr line
+
+          pure (process, stdoutReporter, stderrReporter)
+      )
+      ( \(process, stdoutReporter, stderrReporter) -> do
+          Async.cancel stdoutReporter
+          Async.cancel stderrReporter
+          Process.cleanupProcess process
+      )
+
+  pure ()
