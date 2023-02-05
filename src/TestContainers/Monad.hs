@@ -26,8 +26,9 @@ import Control.Monad.Catch
   )
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.IO.Unlift (MonadUnliftIO (..))
 import Control.Monad.Reader (MonadReader (..), ReaderT, runReaderT)
-import Control.Monad.Trans.Resource (MonadResource, MonadUnliftIO, ResourceT, runResourceT)
+import Control.Monad.Trans.Resource (MonadResource, ResourceT, runResourceT)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import TestContainers.Docker.Reaper (Reaper)
 import TestContainers.Trace (Tracer)
@@ -45,13 +46,19 @@ newtype TestContainer a = TestContainer {unTestContainer :: ReaderT TestContaine
       Applicative,
       Monad,
       MonadIO,
-      MonadUnliftIO,
       MonadMask,
       MonadCatch,
       MonadThrow,
       MonadResource,
       MonadFix
     )
+
+-- Instance defined without newtype deriving as GHC has a hard time
+-- deriving it for old versions of unliftio.
+instance MonadUnliftIO TestContainer where
+  withRunInIO action = TestContainer $
+    withRunInIO $ \runInIo ->
+      action (runInIo . unTestContainer)
 
 instance MonadReader Config TestContainer where
   ask = TestContainer $ do
