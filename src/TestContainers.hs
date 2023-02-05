@@ -30,6 +30,11 @@ module TestContainers
     M.setLink,
     M.setExpose,
     M.setWaitingFor,
+    M.withFollowLogs,
+
+    -- * Logs
+    M.LogConsumer,
+    M.consoleLogConsumer,
 
     -- * @docker network@ parameters
     M.NetworkRequest,
