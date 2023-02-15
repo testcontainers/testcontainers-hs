@@ -163,9 +163,8 @@ import Control.Monad.Catch
     throwM,
     try,
   )
-import Control.Monad.Fix (mfix)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.IO.Unlift (MonadUnliftIO (withRunInIO), askRunInIO)
+import Control.Monad.IO.Unlift (MonadUnliftIO (withRunInIO))
 import Control.Monad.Reader (MonadReader (..))
 import Control.Monad.Trans.Resource
   ( ReleaseKey,
@@ -574,28 +573,21 @@ run request = do
         unsafePerformIO $
           internalInspect configTracer id
 
-  container <- mfix $ \container -> do
-    -- If there is no reaper running just yet we start a new reaper instance.
-    releaseKey <-
-      if noReaper
-        then do
-          runInIO <- askRunInIO
-          register $
-            runInIO (stop container)
-        else do
-          register (pure ())
+  -- We don't issue 'ReleaseKeys' for cleanup anymore. Ryuk takes care of cleanup
+  -- for us once the session has been closed.
+  releaseKey <- register (pure ())
 
-    forM_ followLogs $
-      dockerFollowLogs configTracer id
+  forM_ followLogs $
+    dockerFollowLogs configTracer id
 
-    pure
-      Container
-        { id,
-          releaseKey,
-          image,
-          inspectOutput,
-          config
-        }
+  let container =
+        Container
+          { id,
+            releaseKey,
+            image,
+            inspectOutput,
+            config
+          }
 
   -- Last but not least, execute the WaitUntilReady checks
   waitUntilReady container readiness
@@ -1089,6 +1081,7 @@ containerImage Container {image} = image
 -- @since 0.1.0.0
 containerReleaseKey :: Container -> ReleaseKey
 containerReleaseKey Container {releaseKey} = releaseKey
+{-# DEPRECATED containerReleaseKey "Containers are cleaned up with a separate resource reaper. Releasing the container manually is not going to work." #-}
 
 -- | Looks up the ip address of the container.
 --
