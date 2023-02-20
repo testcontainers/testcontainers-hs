@@ -11,7 +11,7 @@ import TestContainers.Monad (Config (..))
 
 -- | Default configuration.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 defaultConfig :: Config
 defaultConfig =
   Config

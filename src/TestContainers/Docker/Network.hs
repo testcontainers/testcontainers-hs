@@ -29,20 +29,20 @@ import Prelude hiding (id)
 
 -- | Handle to a Docker network.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 newtype Network = Network
   { id :: NetworkId
   }
 
 -- | Returns the id of the network.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 networkId :: Network -> NetworkId
 networkId Network {id} = id
 
 -- | Parameters for creating a new Docker network.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 data NetworkRequest = NetworkRequest
   { ipv6 :: Bool,
     driver :: Maybe Text,
@@ -51,7 +51,7 @@ data NetworkRequest = NetworkRequest
 
 -- | Default parameters for creating a new Docker network.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 networkRequest :: NetworkRequest
 networkRequest =
   NetworkRequest
@@ -62,21 +62,21 @@ networkRequest =
 
 -- | Enable IPv6 for the Docker network.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 withIpv6 :: NetworkRequest -> NetworkRequest
 withIpv6 request =
   request {ipv6 = True}
 
 -- | Driver to manage the Network (default "bridge").
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 withDriver :: Text -> NetworkRequest -> NetworkRequest
 withDriver driver request =
   request {driver = Just driver}
 
 -- | Creates a new 'Network' from a 'NetworkRequest'.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 createNetwork :: NetworkRequest -> TestContainer Network
 createNetwork NetworkRequest {..} = do
   Config {..} <- ask

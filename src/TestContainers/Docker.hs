@@ -280,7 +280,7 @@ data ContainerRequest = ContainerRequest
 
 -- | Parameters for a naming a Docker container.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 data NamingStrategy
   = RandomName
   | FixedName Text
@@ -319,7 +319,7 @@ setName = setFixedName
 -- | Set the name of a Docker container. This is equivalent to invoking @docker run@
 -- with the @--name@ parameter.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 setFixedName :: Text -> ContainerRequest -> ContainerRequest
 setFixedName newName req =
   -- TODO error on empty Text
@@ -328,7 +328,7 @@ setFixedName newName req =
 -- | Set the name randomly given of a Docker container. This is equivalent to omitting
 --  the @--name@ parameter calling @docker run@.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 setRandomName :: ContainerRequest -> ContainerRequest
 setRandomName req =
   -- TODO error on empty Text
@@ -337,7 +337,7 @@ setRandomName req =
 -- | Set the name randomly suffixed of a Docker container. This is equivalent to invoking
 -- @docker run@ with the @--name@ parameter.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 setSuffixedName :: Text -> ContainerRequest -> ContainerRequest
 setSuffixedName preffix req =
   -- TODO error on empty Text
@@ -376,7 +376,7 @@ setEnv newEnv req =
 -- | Set the network the container will connect to. This is equivalent to passing
 -- @--network network_name@ to @docker run@.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 withNetwork :: Network -> ContainerRequest -> ContainerRequest
 withNetwork network req =
   req {network = Just (Left network)}
@@ -384,14 +384,14 @@ withNetwork network req =
 -- | Set the network alias for this container. This is equivalent to passing
 -- @--network-alias alias@ to @docker run@.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 withNetworkAlias :: Text -> ContainerRequest -> ContainerRequest
 withNetworkAlias alias req =
   req {networkAlias = Just alias}
 
 -- | Sets labels for a container
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 withLabels :: [(Text, Text)] -> ContainerRequest -> ContainerRequest
 withLabels xs request =
   request {labels = xs}
@@ -406,7 +406,7 @@ setLink newLink req =
 
 -- | Forwards container logs to the given 'LogConsumer' once ran.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 withFollowLogs :: LogConsumer -> ContainerRequest -> ContainerRequest
 withFollowLogs logConsumer request =
   request {followLogs = Just logConsumer}
@@ -434,14 +434,14 @@ data Port = Port
 defaultProtocol :: Text
 defaultProtocol = "tcp"
 
--- @since 0.4.0.0
+-- @since 0.5.0.0
 instance Show Port where
   show Port {port, protocol} =
     show port <> "/" <> unpack protocol
 
 -- | A cursed but handy instance supporting literal 'Port's.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 instance Num Port where
   fromInteger x =
     Port {port = fromIntegral x, protocol = defaultProtocol}
@@ -454,7 +454,7 @@ instance Num Port where
 -- | A cursed but handy instance supporting literal 'Port's of them
 -- form @"8080"@, @"8080/udp"@, @"8080/tcp"@.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 instance IsString Port where
   fromString input = case splitOn "/" (pack input) of
     [numberish]
@@ -586,7 +586,7 @@ run request = do
 
 -- | Sets up a Ryuk 'Reaper'.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 createRyukReaper :: TestContainer Reaper
 createRyukReaper = do
   ryukContainer <-
@@ -768,11 +768,11 @@ data WaitUntilReady
       -- Next check
       WaitUntilReady
 
--- | @since 0.4.0.0
+-- | @since 0.5.0.0
 instance Semigroup WaitUntilReady where
   (<>) = WaitMany
 
--- | @since 0.4.0.0
+-- | @since 0.5.0.0
 instance Monoid WaitUntilReady where
   mempty = WaitReady mempty
 
@@ -813,7 +813,7 @@ instance Exception InvalidStateException
 -- | @waitForState@ waits for a certain state of the container. If the container reaches a terminal
 -- state 'InvalidStateException' will be thrown.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 waitForState :: (State -> Bool) -> WaitUntilReady
 waitForState isReady = WaitReady $ \Container {id} -> do
   let wait = do
@@ -841,7 +841,7 @@ waitForState isReady = WaitReady $ \Container {id} -> do
 
 -- | @successfulExit@ is supposed to be used in conjunction with 'waitForState'.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 successfulExit :: State -> Bool
 successfulExit state =
   stateStatus state == Exited && stateExitCode state == Just 0
@@ -857,7 +857,7 @@ waitUntilTimeout = WaitUntilTimeout
 -- | Waits for a specific http status code.
 -- This combinator should always be used with `waitUntilTimeout`.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 waitForHttp ::
   -- | Port
   Port ->
@@ -1097,7 +1097,7 @@ internalContainerIp Container {id, inspectOutput} =
 -- | Get the container's network alias.
 -- Takes the first alias found.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 containerAlias :: Container -> Text
 containerAlias Container {id, inspectOutput} =
   case inspectOutput
@@ -1120,7 +1120,7 @@ containerAlias Container {id, inspectOutput} =
 -- | Get the IP address for the container's gateway, i.e. the host.
 -- Takes the first gateway address found.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 containerGateway :: Container -> Text
 containerGateway Container {id, inspectOutput} =
   case inspectOutput
@@ -1174,7 +1174,7 @@ containerPort Container {id, inspectOutput} Port {port, protocol} =
 -- domain and port if the program is running in the same network. Otherwise,
 -- 'containerAddress' will use the exposed port on the Docker host.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 containerAddress :: Container -> Port -> (Text, Int)
 containerAddress container Port {port, protocol} =
   let inDocker = unsafePerformIO isRunningInDocker

@@ -24,7 +24,7 @@ import qualified System.Random as Random
 
 -- | Reaper for safe resource cleanup.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 data Reaper = Reaper
   { -- | @runReaper label value@ reaps Docker any Docker resource with a matching
     -- label.
@@ -37,33 +37,33 @@ data Reaper = Reaper
 -- | Additional labels to add to any Docker resource on creation. Adding the
 -- labels is necessary in order for the 'Reaper' to find resources for cleanup.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 reaperLabels :: Reaper -> [(Text, Text)]
 reaperLabels Reaper {labels} =
   labels
 
 -- | Ryuk based resource reaper
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 newtype Ryuk = Ryuk {ryukSocket :: Socket.Socket}
 
 -- | Tag for the ryuk image
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 ryukImageTag :: Text
 ryukImageTag =
   "docker.io/testcontainers/ryuk:0.3.4"
 
 -- | Exposed port for the ryuk reaper.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 ryukPort :: (Num a) => a
 ryukPort =
   8080
 
 -- | Creates a new 'Reaper' from a host and port.
 --
--- @since 0.4.0.0
+-- @since 0.5.0.0
 newRyukReaper ::
   (MonadResource m) =>
   -- | Host
