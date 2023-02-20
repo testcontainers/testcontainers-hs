@@ -8,7 +8,13 @@
 
 * BREAKING: Introduce TestContainer monad (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/29)
 
+* Control container naming (@blackheaven, https://github.com/testcontainers/testcontainers-hs/pull/18)
+
 * Ability to use Docker networks (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/32)
+
+* Better handling of running testcontainers from within Docker (@michivi, https://github.com/testcontainers/testcontainers-hs/pull/22)
+
+* Ability to wait for particular HTTP routes to become available with waitforHttp (@michivi, https://github.com/testcontainers/testcontainers-hs/pull/24)
 
 * Some internal module reorganization (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/32)
 
