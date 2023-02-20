@@ -175,7 +175,6 @@ import Control.Monad.Trans.Resource
 import Data.Aeson (decode')
 import qualified Data.Aeson.Optics as Optics
 import qualified Data.ByteString.Lazy.Char8 as LazyByteString
-import qualified Data.ByteString.UTF8 as BSU
 import Data.Function ((&))
 import Data.List (find)
 import Data.String (IsString (..))
@@ -889,7 +888,7 @@ waitForHttp port path acceptableStatusCodes = WaitReady $ \container -> do
               defaultRequest
                 { host = encodeUtf8 endpointHost,
                   port = endpointPort,
-                  path = BSU.fromString path
+                  path = encodeUtf8 (pack path)
                 }
         result <-
           try $
