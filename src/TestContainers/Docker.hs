@@ -598,8 +598,8 @@ createRyukReaper = do
         & setWaitingFor (waitUntilMappedPortReachable ryukPort)
         & setRm True
 
-  (ryukContainerAddress, ryukContainerPort) <-
-    containerAddress ryukContainer ryukPort
+  let (ryukContainerAddress, ryukContainerPort) =
+        containerAddress ryukContainer ryukPort
 
   newRyukReaper ryukContainerAddress ryukContainerPort
 
@@ -874,7 +874,8 @@ waitForHttp port path acceptableStatusCodes = WaitReady $ \container -> do
 
       retry :: (MonadIO m, MonadCatch m) => Manager -> m ()
       retry manager = do
-        (endpointHost, endpointPort) <- containerAddress container port
+        let (endpointHost, endpointPort) =
+              containerAddress container port
         let request =
               defaultRequest
                 { host = encodeUtf8 endpointHost,
@@ -927,7 +928,8 @@ waitUntilMappedPortReachable port = WaitReady $ \container -> do
           pure socket
 
         wait = do
-          (endpointHost, endpointPort) <- containerAddress container port
+          let (endpointHost, endpointPort) =
+                containerAddress container port
 
           result <- try (resolve (unpack endpointHost) endpointPort >>= open)
           case result of
@@ -1173,13 +1175,12 @@ containerPort Container {id, inspectOutput} Port {port, protocol} =
 -- 'containerAddress' will use the exposed port on the Docker host.
 --
 -- @since 0.4.0.0
-containerAddress :: (MonadIO m) => Container -> Port -> m (Text, Int)
-containerAddress container Port {port, protocol} = do
-  inDocker <- isRunningInDocker
-  pure $
-    if inDocker
-      then (containerAlias container, port)
-      else ("localhost", containerPort container (Port {port, protocol}))
+containerAddress :: Container -> Port -> (Text, Int)
+containerAddress container Port {port, protocol} =
+  let inDocker = unsafePerformIO isRunningInDocker
+   in if inDocker
+        then (containerAlias container, port)
+        else ("localhost", containerPort container (Port {port, protocol}))
 
 -- | Runs the `docker inspect` command. Memoizes the result.
 --
