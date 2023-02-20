@@ -42,7 +42,7 @@ import TestContainers.Trace (Trace (..), Tracer, withTrace)
 
 -- | Identifies a network within the Docker runtime. Assigned by @docker network create@
 --
--- @since x.x.x
+-- @since 0.4.0.0
 type NetworkId = Text
 
 -- | Identifies a container within the Docker runtime. Assigned by @docker run@.
@@ -132,12 +132,12 @@ data Pipe
 
 -- | An abstraction for forwarding logs.
 --
--- @since x.x.x
+-- @since 0.4.0.0
 type LogConsumer = Pipe -> ByteString -> IO ()
 
 -- | A simple 'LogConsumer' that writes log lines to stdout and stderr respectively.
 --
--- @since x.x.x
+-- @since 0.4.0.0
 consoleLogConsumer :: LogConsumer
 consoleLogConsumer pipe line = do
   case pipe of
@@ -150,7 +150,7 @@ consoleLogConsumer pipe line = do
 
 -- | Forwards container logs to a 'LogConsumer'. This is equivalent of calling @docker logs containerId --follow@
 --
--- @since x.x.x
+-- @since 0.4.0.0
 dockerFollowLogs :: (MonadResource m) => Tracer -> ContainerId -> LogConsumer -> m ()
 dockerFollowLogs tracer containerId logConsumer = do
   let dockerArgs =

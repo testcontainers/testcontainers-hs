@@ -13,22 +13,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module TestContainers.Docker
-  ( MonadDocker,
-    TestContainer,
-
-    -- * Configuration
-    Config (..),
-    defaultDockerConfig,
-    determineConfig,
-
-    -- * Exeuction tracing
-    Tracer,
-    Trace (..),
-    newTracer,
-    withTrace,
-
-    -- * Docker image
+module TestContainers.Docker.Container
+  ( -- * Docker image
     ImageTag,
     Image,
     imageTag,
@@ -47,20 +33,6 @@ module TestContainers.Docker
     containerPort,
     containerAddress,
     containerReleaseKey,
-
-    -- * Container state
-    State,
-    Status (..),
-    stateError,
-    stateExitCode,
-    stateFinishedAt,
-    stateOOMKilled,
-    statePid,
-    stateStartedAt,
-    stateStatus,
-
-    -- * Predicates to assert container state
-    successfulExit,
 
     -- * Referring to images
     ToImage,
@@ -92,21 +64,6 @@ module TestContainers.Docker
     setWaitingFor,
     run,
 
-    -- * Following logs
-    LogConsumer,
-    consoleLogConsumer,
-    withFollowLogs,
-
-    -- * Network related functionality
-    NetworkId,
-    Network,
-    NetworkRequest,
-    networkId,
-    networkRequest,
-    createNetwork,
-    withIpv6,
-    withDriver,
-
     -- * Managing the container lifecycle
     InspectOutput,
     inspect,
@@ -123,13 +80,10 @@ module TestContainers.Docker
     TimeoutException (..),
     waitUntilTimeout,
 
-    -- * Wait for container state
-    waitForState,
-
     -- * Wait until a specific pattern appears in the logs
     waitWithLogs,
-    Pipe (..),
     UnexpectedEndOfPipe (..),
+    Pipe (..),
     waitForLogLine,
 
     -- * Misc. Docker functions
@@ -142,9 +96,6 @@ module TestContainers.Docker
     -- * Wait until the http server responds with a specific status code
     waitForHttp,
 
-    -- * Reaper
-    createRyukReaper,
-
     -- * Reexports for convenience
     ResIO,
     runResourceT,
@@ -154,7 +105,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (IOException, throw)
-import Control.Monad (forM_, replicateM, unless)
+import Control.Monad (replicateM, unless)
 import Control.Monad.Catch
   ( Exception,
     MonadCatch,
@@ -163,8 +114,9 @@ import Control.Monad.Catch
     throwM,
     try,
   )
+import Control.Monad.Fix (mfix)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.IO.Unlift (MonadUnliftIO (withRunInIO))
+import Control.Monad.IO.Unlift (MonadUnliftIO (withRunInIO), askRunInIO)
 import Control.Monad.Reader (MonadReader (..))
 import Control.Monad.Trans.Resource
   ( ReleaseKey,
@@ -172,7 +124,7 @@ import Control.Monad.Trans.Resource
     register,
     runResourceT,
   )
-import Data.Aeson (decode')
+import Data.Aeson (Value, decode')
 import qualified Data.Aeson.Optics as Optics
 import qualified Data.ByteString.Lazy.Char8 as LazyByteString
 import qualified Data.ByteString.UTF8 as BSU
@@ -207,32 +159,13 @@ import System.IO.Unsafe (unsafePerformIO)
 import qualified System.Process as Process
 import qualified System.Random as Random
 import System.Timeout (timeout)
-import TestContainers.Config
-  ( Config (..),
-    defaultDockerConfig,
-    determineConfig,
-  )
 import TestContainers.Docker.Internal
   ( ContainerId,
     DockerException (..),
-    InspectOutput,
-    LogConsumer,
-    Pipe (..),
-    consoleLogConsumer,
     docker,
-    dockerFollowLogs,
     dockerWithStdin,
   )
-import TestContainers.Docker.Network
-  ( Network,
-    NetworkId,
-    NetworkRequest,
-    createNetwork,
-    networkId,
-    networkRequest,
-    withDriver,
-    withIpv6,
-  )
+import TestContainers.Docker.Network (Network, networkId)
 import TestContainers.Docker.Reaper
   ( Reaper,
     newRyukReaper,
@@ -240,23 +173,12 @@ import TestContainers.Docker.Reaper
     ryukImageTag,
     ryukPort,
   )
-import TestContainers.Docker.State
-  ( State,
-    Status (..),
-    containerState,
-    stateError,
-    stateExitCode,
-    stateFinishedAt,
-    stateOOMKilled,
-    statePid,
-    stateStartedAt,
-    stateStatus,
-  )
 import TestContainers.Monad
-  ( MonadDocker,
+  ( Config (..),
     TestContainer,
+    getReaper,
   )
-import TestContainers.Trace (Trace (..), Tracer, newTracer, withTrace)
+import TestContainers.Trace (Trace (..), Tracer, withTrace)
 import Prelude hiding (error, id)
 import qualified Prelude
 
@@ -276,8 +198,7 @@ data ContainerRequest = ContainerRequest
     rmOnExit :: Bool,
     readiness :: WaitUntilReady,
     labels :: [(Text, Text)],
-    noReaper :: Bool,
-    followLogs :: Maybe LogConsumer
+    noReaper :: Bool
   }
 
 -- | Parameters for a naming a Docker container.
@@ -306,8 +227,7 @@ containerRequest image =
       rmOnExit = False,
       readiness = mempty,
       labels = mempty,
-      noReaper = False,
-      followLogs = Nothing
+      noReaper = False
     }
 
 -- | Set the name of a Docker container. This is equivalent to invoking @docker run@
@@ -414,13 +334,6 @@ setLink :: [ContainerId] -> ContainerRequest -> ContainerRequest
 setLink newLink req =
   req {links = newLink}
 
--- | Forwards container logs to the given 'LogConsumer' once ran.
---
--- @since 0.4.0.0
-withFollowLogs :: LogConsumer -> ContainerRequest -> ContainerRequest
-withFollowLogs logConsumer request =
-  request {followLogs = Just logConsumer}
-
 -- | Defintion of a 'Port'. Allows for specifying ports using various protocols. Due to the
 -- 'Num' and 'IsString' instance allows for convenient Haskell literals.
 --
@@ -520,18 +433,14 @@ run request = do
           rmOnExit,
           readiness,
           labels,
-          noReaper,
-          followLogs
+          noReaper
         } = request
-
-  config@Config {configTracer, configCreateReaper} <-
-    ask
 
   additionalLabels <-
     if noReaper
       then do
         pure []
-      else reaperLabels <$> configCreateReaper
+      else reaperLabels <$> getReaper
 
   image@Image {tag} <- runToImage toImage
 
@@ -561,6 +470,8 @@ run request = do
             ++ [[tag]]
             ++ [command | Just command <- [cmd]]
 
+  config@Config {configTracer} <- ask
+
   stdout <- docker configTracer dockerRun
 
   let id :: ContainerId
@@ -573,45 +484,30 @@ run request = do
         unsafePerformIO $
           internalInspect configTracer id
 
-  -- We don't issue 'ReleaseKeys' for cleanup anymore. Ryuk takes care of cleanup
-  -- for us once the session has been closed.
-  releaseKey <- register (pure ())
+  container <- mfix $ \container -> do
+    -- If there is no reaper running just yet we start a new reaper instance.
+    releaseKey <-
+      if noReaper
+        then do
+          runInIO <- askRunInIO
+          register $
+            runInIO (stop container)
+        else do
+          register (pure ())
 
-  forM_ followLogs $
-    dockerFollowLogs configTracer id
-
-  let container =
-        Container
-          { id,
-            releaseKey,
-            image,
-            inspectOutput,
-            config
-          }
+    pure
+      Container
+        { id,
+          releaseKey,
+          image,
+          inspectOutput,
+          config
+        }
 
   -- Last but not least, execute the WaitUntilReady checks
   waitUntilReady container readiness
 
   pure container
-
--- | Sets up a Ryuk 'Reaper'.
---
--- @since 0.4.0.0
-createRyukReaper :: TestContainer Reaper
-createRyukReaper = do
-  ryukContainer <-
-    run $
-      containerRequest (fromTag ryukImageTag)
-        & skipReaper
-        & setVolumeMounts [("/var/run/docker.sock", "/var/run/docker.sock")]
-        & setExpose [ryukPort]
-        & setWaitingFor (waitUntilMappedPortReachable ryukPort)
-        & setRm True
-
-  (ryukContainerAddress, ryukContainerPort) <-
-    containerAddress ryukContainer ryukPort
-
-  newRyukReaper ryukContainerAddress ryukContainerPort
 
 -- | Internal attribute, serving as a loop breaker: When runnign a container
 -- we ensure a 'Reaper' is present, since the 'Reaper' itself is a running
@@ -809,53 +705,6 @@ newtype TimeoutException = TimeoutException
 
 instance Exception TimeoutException
 
--- | The exception thrown by `waitForState`.
---
--- @since 0.1.0.0
-newtype InvalidStateException = InvalidStateException
-  { -- | The id of the underlying container that was not ready in time.
-    id :: ContainerId
-  }
-  deriving stock (Eq, Show)
-
-instance Exception InvalidStateException
-
--- | @waitForState@ waits for a certain state of the container. If the container reaches a terminal
--- state 'InvalidStateException' will be thrown.
---
--- @since 0.4.0.0
-waitForState :: (State -> Bool) -> WaitUntilReady
-waitForState isReady = WaitReady $ \Container {id} -> do
-  let wait = do
-        Config {configTracer} <-
-          ask
-        inspectOutput <-
-          internalInspect configTracer id
-
-        let state = containerState inspectOutput
-
-        if isReady state
-          then pure ()
-          else do
-            case stateStatus state of
-              Exited ->
-                -- Once exited, state won't change!
-                throwM InvalidStateException {id}
-              Dead ->
-                -- Once dead, state won't change!
-                throwM InvalidStateException {id}
-              _ -> do
-                liftIO (threadDelay 500000)
-                wait
-  wait
-
--- | @successfulExit@ is supposed to be used in conjunction with 'waitForState'.
---
--- @since 0.4.0.0
-successfulExit :: State -> Bool
-successfulExit state =
-  stateStatus state == Exited && stateExitCode state == Just 0
-
 -- | @waitUntilTimeout n waitUntilReady@ waits @n@ seconds for the container
 -- to be ready. If the container is not ready by then a `TimeoutException` will
 -- be thrown.
@@ -966,6 +815,16 @@ waitWithLogs waiter = WaitReady $ \container ->
   withLogs container $ \stdout stderr ->
     liftIO $ waiter container stdout stderr
 
+-- | A data type indicating which pipe to scan for a specific log line.
+--
+-- @since 0.1.0.0
+data Pipe
+  = -- | Refer to logs on STDOUT.
+    Stdout
+  | -- | Refer to logs on STDERR.
+    Stderr
+  deriving (Eq, Ord, Show)
+
 -- | Waits for a specific line to occur in the logs. Throws a `UnexpectedEndOfPipe`
 -- exception in case the desired line can not be found on the logs.
 --
@@ -1062,6 +921,11 @@ data Container = Container
     inspectOutput :: InspectOutput
   }
 
+-- | The parsed JSON output of docker inspect command.
+--
+-- @since 0.1.0.0
+type InspectOutput = Value
+
 -- | Returns the id of the container.
 --
 -- @since 0.1.0.0
@@ -1081,7 +945,6 @@ containerImage Container {image} = image
 -- @since 0.1.0.0
 containerReleaseKey :: Container -> ReleaseKey
 containerReleaseKey Container {releaseKey} = releaseKey
-{-# DEPRECATED containerReleaseKey "Containers are cleaned up with a separate resource reaper. Releasing the container manually is not going to work." #-}
 
 -- | Looks up the ip address of the container.
 --
