@@ -27,7 +27,7 @@ import TestContainers.Docker.Internal (InspectOutput)
 
 -- | An exception thrown in case the State object is invalid and couldn't be parsed.
 --
--- @since x.x.x
+-- @since 0.4.0.0
 data StateInvalidException = StateInvalidException
   deriving stock (Eq, Show)
 
@@ -35,7 +35,7 @@ instance Exception StateInvalidException
 
 -- | Status of a Docker container.
 --
--- @since x.x.x
+-- @since 0.4.0.0
 data Status
   = Created
   | Running
@@ -49,12 +49,12 @@ data Status
 
 -- | State of a Docker container.
 --
--- @since x.x.x
+-- @since 0.4.0.0
 newtype State = State Value
 
 -- | Extract the 'State' of a Docker container from an 'InspectOutput'.
 --
--- @since x.x.x
+-- @since 0.4.0.0
 containerState :: InspectOutput -> State
 containerState inspectOutput =
   case inspectOutput ^? Optics.key "State" of
@@ -63,7 +63,7 @@ containerState inspectOutput =
 
 -- | Returns the 'Status' of container.
 --
--- @since x.x.x
+-- @since 0.4.0.0
 stateStatus :: State -> Status
 stateStatus (State value) =
   case value
@@ -81,7 +81,7 @@ stateStatus (State value) =
 
 -- | Whether a container was killed by the OOM killer.
 --
--- @since x.x.x
+-- @since 0.4.0.0
 stateOOMKilled :: State -> Bool
 stateOOMKilled (State value) =
   case value
@@ -92,7 +92,7 @@ stateOOMKilled (State value) =
 
 -- |
 --
--- @since x.x.x
+-- @since 0.4.0.0
 statePid :: State -> Maybe Int
 statePid (State value) =
   case value
@@ -103,7 +103,7 @@ statePid (State value) =
 
 -- |
 --
--- @since x.x.x
+-- @since 0.4.0.0
 stateExitCode :: State -> Maybe Int
 stateExitCode (State value) =
   case value
@@ -114,7 +114,7 @@ stateExitCode (State value) =
 
 -- |
 --
--- @since x.x.x
+-- @since 0.4.0.0
 stateError :: State -> Maybe Text
 stateError (State value) =
   case value
@@ -125,7 +125,7 @@ stateError (State value) =
 
 -- |
 --
--- @since x.x.x
+-- @since 0.4.0.0
 stateStartedAt :: State -> Maybe Text
 stateStartedAt (State value) =
   case value
@@ -136,7 +136,7 @@ stateStartedAt (State value) =
 
 -- |
 --
--- @since x.x.x
+-- @since 0.4.0.0
 stateFinishedAt :: State -> Maybe Text
 stateFinishedAt (State value) =
   case value

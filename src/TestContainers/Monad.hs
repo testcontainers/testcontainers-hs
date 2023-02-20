@@ -39,7 +39,7 @@ newtype TestContainerEnv = TestContainerEnv
 
 -- | The heart and soul of the testcontainers library.
 --
--- @since x.x.x
+-- @since 0.4.0.0
 newtype TestContainer a = TestContainer {unTestContainer :: ReaderT TestContainerEnv (ResourceT IO) a}
   deriving newtype
     ( Functor,
@@ -78,7 +78,7 @@ instance (Monoid a) => Monoid (TestContainer a) where
 -- | Run a 'TestContainer' action. Any container spun up during the computation are guaranteed
 -- to be shutdown and cleaned up once this function returns.
 --
--- @since x.x.x
+-- @since 0.4.0.0
 runTestContainer :: Config -> TestContainer a -> IO a
 runTestContainer config action = do
   -- Ensure through caching that there is only ever exactly
@@ -106,7 +106,7 @@ runTestContainer config action = do
         )
     )
 
--- | Docker related functionality is parameterized over this `Monad`. Since x.x.x this is
+-- | Docker related functionality is parameterized over this `Monad`. Since 0.4.0.0 this is
 -- just a type alias for @m ~ 'TestContainer'@.
 --
 -- @since 0.1.0.0
