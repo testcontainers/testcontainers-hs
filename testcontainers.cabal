@@ -11,8 +11,8 @@ description:
 license:            MIT
 license-file:       LICENSE
 author:             Alex Biehl
-maintainer:         alex.biehl@target.com
-copyright:          2020 Alex Biehl
+maintainer:         alex.biehl@gmail.com
+copyright:          2023 Alex Biehl
 category:           Development
 build-type:         Simple
 extra-source-files:
@@ -24,7 +24,7 @@ tested-with:
 
 source-repository head
   type:     git
-  location: https://github.com/alexbiehl/testcontainers-hs
+  location: https://github.com/testcontainers/testcontainers-hs
 
 library
   exposed-modules:
