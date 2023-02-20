@@ -1,6 +1,6 @@
 # Revision history for testcontainer-hs
 
-## 0.4.0.0 -- 2023-02-xx
+## 0.4.0.0 -- 2023-02-20
 
 * BREAKING: Refined lifecycle management. testcontainers is now using testcontainers/ryuk resource reaper to cleanup containers, networks and volumes. Release keys for containers are deprecated. (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/33)
 
