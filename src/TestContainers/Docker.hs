@@ -84,7 +84,6 @@ module TestContainers.Docker
     setVolumeMounts,
     setRm,
     setEnv,
-    setNetwork,
     withNetwork,
     withNetworkAlias,
     setLink,
@@ -373,14 +372,6 @@ setRm newRm req =
 setEnv :: [(Text, Text)] -> ContainerRequest -> ContainerRequest
 setEnv newEnv req =
   req {env = newEnv}
-
--- | Set the network the container will connect to. This is equivalent to passing
--- @--network network_name@ to @docker run@.
---
--- @since 0.4.0.0
-setNetwork :: Text -> ContainerRequest -> ContainerRequest
-setNetwork networkName req =
-  req {network = Just (Right networkName)}
 
 -- | Set the network the container will connect to. This is equivalent to passing
 -- @--network network_name@ to @docker run@.
