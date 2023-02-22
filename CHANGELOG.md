@@ -1,5 +1,9 @@
 # Revision history for testcontainer-hs
 
+## x.x.x -- 2023-xx-xx
+
+* Introduce `withWorkingDirectory` to set the working directory inside a container (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/37)
+
 ## 0.5.0.0 -- 2023-02-20
 
 * BREAKING: Refined lifecycle management. testcontainers is now using testcontainers/ryuk resource reaper to cleanup containers, networks and volumes. Release keys for containers are deprecated. (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/33)
