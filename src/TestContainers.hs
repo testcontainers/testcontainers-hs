@@ -24,6 +24,7 @@ module TestContainers
     M.setVolumeMounts,
     M.setRm,
     M.setEnv,
+    M.withWorkingDirectory,
     M.withNetwork,
     M.withNetworkAlias,
     M.setLink,
