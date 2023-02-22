@@ -84,6 +84,7 @@ module TestContainers.Docker
     setVolumeMounts,
     setRm,
     setEnv,
+    withWorkingDirectory,
     withNetwork,
     withNetworkAlias,
     setLink,
@@ -275,7 +276,8 @@ data ContainerRequest = ContainerRequest
     readiness :: WaitUntilReady,
     labels :: [(Text, Text)],
     noReaper :: Bool,
-    followLogs :: Maybe LogConsumer
+    followLogs :: Maybe LogConsumer,
+    workDirectory :: Maybe Text
   }
 
 -- | Parameters for a naming a Docker container.
@@ -305,7 +307,8 @@ containerRequest image =
       readiness = mempty,
       labels = mempty,
       noReaper = False,
-      followLogs = Nothing
+      followLogs = Nothing,
+      workDirectory = Nothing
     }
 
 -- | Set the name of a Docker container. This is equivalent to invoking @docker run@
@@ -372,6 +375,13 @@ setRm newRm req =
 setEnv :: [(Text, Text)] -> ContainerRequest -> ContainerRequest
 setEnv newEnv req =
   req {env = newEnv}
+
+-- | Sets the working directory inside the container.
+--
+-- @since x.x.x
+withWorkingDirectory :: Text -> ContainerRequest -> ContainerRequest
+withWorkingDirectory workdir request =
+  request {workDirectory = Just workdir}
 
 -- | Set the network the container will connect to. This is equivalent to passing
 -- @--network network_name@ to @docker run@.
@@ -511,7 +521,8 @@ run request = do
           readiness,
           labels,
           noReaper,
-          followLogs
+          followLogs,
+          workDirectory
         } = request
 
   config@Config {configTracer, configCreateReaper} <-
@@ -548,6 +559,7 @@ run request = do
             ++ [["--link", container] | container <- links]
             ++ [["--volume", src <> ":" <> dest] | (src, dest) <- volumeMounts]
             ++ [["--rm"] | rmOnExit]
+            ++ [["--workdir", workdir] | Just workdir <- [workDirectory]]
             ++ [[tag]]
             ++ [command | Just command <- [cmd]]
 
