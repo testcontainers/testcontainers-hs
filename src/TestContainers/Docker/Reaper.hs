@@ -83,7 +83,10 @@ newRyukReaper host port = do
           address <-
             head <$> Socket.getAddrInfo (Just hints) (Just (unpack host)) (Just (show port))
           socket <-
-            Socket.openSocket address
+            Socket.socket
+              (Socket.addrFamily address)
+              (Socket.addrSocketType address)
+              (Socket.addrProtocol address)
           Socket.connect socket (Socket.addrAddress address)
           pure (socket, runRyuk sessionId (Ryuk socket))
       )
