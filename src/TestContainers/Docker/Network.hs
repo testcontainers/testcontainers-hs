@@ -10,6 +10,7 @@ module TestContainers.Docker.Network
     networkId,
 
     -- * Creating networks
+    fromExistingNetwork,
     createNetwork,
     NetworkRequest,
     networkRequest,
@@ -73,6 +74,15 @@ withIpv6 request =
 withDriver :: Text -> NetworkRequest -> NetworkRequest
 withDriver driver request =
   request {driver = Just driver}
+
+-- | Creates a 'Network' from an existing 'NetworkId'. Note that the 'Network' is
+-- not managed by the 'TestContainer' monad and as such is not being cleaned up
+-- afterwards.
+--
+-- @since x.x.x
+fromExistingNetwork :: NetworkId -> TestContainer Network
+fromExistingNetwork id =
+  pure Network {id}
 
 -- | Creates a new 'Network' from a 'NetworkRequest'.
 --
