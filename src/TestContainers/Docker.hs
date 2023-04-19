@@ -104,6 +104,7 @@ module TestContainers.Docker
     networkId,
     networkRequest,
     createNetwork,
+    fromExistingNetwork,
     withIpv6,
     withDriver,
 
@@ -227,6 +228,7 @@ import TestContainers.Docker.Network
     NetworkId,
     NetworkRequest,
     createNetwork,
+    fromExistingNetwork,
     networkId,
     networkRequest,
     withDriver,

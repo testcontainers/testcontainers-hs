@@ -46,6 +46,7 @@ module TestContainers
     M.Network,
     M.NetworkId,
     M.createNetwork,
+    M.fromExistingNetwork,
 
     -- * Port
     M.Port (..),
