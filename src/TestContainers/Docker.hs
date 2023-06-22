@@ -4,12 +4,10 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -178,6 +176,7 @@ import qualified Data.Aeson.Optics as Optics
 import qualified Data.ByteString.Lazy.Char8 as LazyByteString
 import Data.Function ((&))
 import Data.List (find)
+import Data.Maybe (fromMaybe)
 import Data.String (IsString (..))
 import Data.Text (Text, pack, splitOn, strip, unpack)
 import Data.Text.Encoding (encodeUtf8)
@@ -1112,9 +1111,9 @@ internalContainerIp Container {id, inspectOutput} =
 -- Takes the first alias found.
 --
 -- @since 0.5.0.0
-containerAlias :: Container -> Text
+containerAlias :: Container -> Maybe Text
 containerAlias Container {id, inspectOutput} =
-  case inspectOutput
+  inspectOutput
     ^? pre
       ( Optics.key "NetworkSettings"
           % Optics.key "Networks"
@@ -1122,14 +1121,7 @@ containerAlias Container {id, inspectOutput} =
           % Optics.key "Aliases"
           % Optics.values
           % Optics._String
-      ) of
-    Nothing ->
-      throw $
-        InspectOutputMissingNetwork
-          { id
-          }
-    Just alias ->
-      alias
+      )
 
 -- | Get the IP address for the container's gateway, i.e. the host.
 -- Takes the first gateway address found.
@@ -1192,9 +1184,12 @@ containerPort Container {id, inspectOutput} Port {port, protocol} =
 containerAddress :: Container -> Port -> (Text, Int)
 containerAddress container Port {port, protocol} =
   let inDocker = unsafePerformIO isRunningInDocker
-   in if inDocker
-        then (containerAlias container, port)
-        else ("localhost", containerPort container (Port {port, protocol}))
+      mappedPort = containerPort container (Port {port, protocol})
+      mAlias = containerAlias container
+   in case (inDocker, mAlias) of
+        (True, Just alias) -> (alias, port)
+        (True, Nothing) -> ("172.17.0.1", mappedPort) -- FIXME Assume default host for now
+        (False, _) -> ("localhost", mappedPort)
 
 -- | Runs the `docker inspect` command. Memoizes the result.
 --
