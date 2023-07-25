@@ -904,7 +904,8 @@ waitForHttp port path acceptableStatusCodes = WaitReady $ \container -> do
             withTrace
               configTracer
               (TraceHttpCall endpointHost endpointPort (Right code))
-            unless (code `elem` acceptableStatusCodes) $
+            unless (code `elem` acceptableStatusCodes) $ do
+              liftIO (threadDelay 500000)
               retry manager
           Left (exception :: HttpException) -> do
             withTrace
