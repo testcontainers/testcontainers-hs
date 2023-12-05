@@ -177,7 +177,8 @@ import Data.Aeson (decode')
 import qualified Data.Aeson.Optics as Optics
 import qualified Data.ByteString.Lazy.Char8 as LazyByteString
 import Data.Function ((&))
-import Data.List (find)
+import Data.List (find, stripPrefix)
+import Data.Maybe (fromMaybe)
 import Data.String (IsString (..))
 import Data.Text (Text, pack, splitOn, strip, unpack)
 import Data.Text.Encoding (encodeUtf8)
@@ -200,8 +201,9 @@ import Network.HTTP.Types (statusCode)
 import qualified Network.Socket as Socket
 import Optics.Fold (pre)
 import Optics.Operators ((^?))
-import Optics.Optic ((%))
+import Optics.Optic ((%), (<&>))
 import System.Directory (doesFileExist)
+import System.Environment (lookupEnv)
 import System.IO (Handle, hClose)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified System.Process as Process
@@ -603,11 +605,16 @@ run request = do
 -- @since 0.5.0.0
 createRyukReaper :: TestContainer Reaper
 createRyukReaper = do
+  dockerSocketLocation <-
+    liftIO $
+      lookupEnv "DOCKER_HOST"
+        <&> (>>= stripPrefix "unix://")
+        <&> fromMaybe "/var/run/docker.sock"
   ryukContainer <-
     run $
       containerRequest (fromTag ryukImageTag)
         & skipReaper
-        & setVolumeMounts [("/var/run/docker.sock", "/var/run/docker.sock")]
+        & setVolumeMounts [(pack dockerSocketLocation, "/var/run/docker.sock")]
         & setExpose [ryukPort]
         & setWaitingFor (waitUntilMappedPortReachable ryukPort)
         & setRm True
