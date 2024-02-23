@@ -15,11 +15,9 @@ jobs:
         os: [ubuntu-latest] # [macOS-latest, windows-latest] do not come with docker :(
         cabal: ["3.6"]
         ghc:
-          - 8.8.4
-          - 8.10.7
-          - 9.0.2
-          - 9.2.4
-          - 9.4.2
+          - 9.2.8
+          - 9.4.8
+          - 9.6.4
 
     steps:
     - uses: actions/checkout@v2
