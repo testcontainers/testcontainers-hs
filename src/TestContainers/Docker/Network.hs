@@ -16,6 +16,7 @@ module TestContainers.Docker.Network
     networkRequest,
     withDriver,
     withIpv6,
+    withoutReaper,
   )
 where
 
@@ -23,7 +24,7 @@ import Control.Monad (replicateM)
 import Control.Monad.Reader (ask)
 import Data.Text (Text, pack, strip)
 import qualified System.Random as Random
-import TestContainers.Docker.Internal (NetworkId, docker)
+import TestContainers.Docker.Internal (NetworkId, WithoutReaper (..), docker)
 import TestContainers.Docker.Reaper (reaperLabels)
 import TestContainers.Monad (Config (..), TestContainer)
 import Prelude hiding (id)
@@ -47,8 +48,12 @@ networkId Network {id} = id
 data NetworkRequest = NetworkRequest
   { ipv6 :: Bool,
     driver :: Maybe Text,
-    labels :: [(Text, Text)]
+    labels :: [(Text, Text)],
+    noReaper :: Bool
   }
+
+instance WithoutReaper NetworkRequest where
+  withoutReaper request = request {noReaper = True}
 
 -- | Default parameters for creating a new Docker network.
 --
@@ -58,7 +63,8 @@ networkRequest =
   NetworkRequest
     { ipv6 = False,
       driver = Nothing,
-      labels = []
+      labels = [],
+      noReaper = False
     }
 
 -- | Enable IPv6 for the Docker network.
@@ -100,7 +106,7 @@ createNetwork NetworkRequest {..} = do
   -- Creating the network with the reaper labels ensures cleanup
   -- at the end of the session
   let additionalLabels =
-        reaperLabels reaper
+        if noReaper then [] else reaperLabels reaper
 
   stdout <-
     docker configTracer $

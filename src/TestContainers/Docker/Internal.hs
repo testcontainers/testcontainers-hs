@@ -21,6 +21,9 @@ module TestContainers.Docker.Internal
     LogConsumer,
     consoleLogConsumer,
     dockerFollowLogs,
+
+    -- * Common abstractions for Docker resources
+    WithoutReaper (..),
   )
 where
 
@@ -39,6 +42,14 @@ import System.Exit (ExitCode (..))
 import qualified System.IO
 import qualified System.Process as Process
 import TestContainers.Trace (Trace (..), Tracer, withTrace)
+
+-- | Shared property between Docker resources.
+class WithoutReaper request where
+  -- | Do not register the docker resource (container, register, etc.) with the resource reaper.
+  -- Careful, doing this will make your container leak on shutdown if not explicitly stopped.
+  --
+  -- @since x.x.x
+  withoutReaper :: request -> request
 
 -- | Identifies a network within the Docker runtime. Assigned by @docker network create@
 --

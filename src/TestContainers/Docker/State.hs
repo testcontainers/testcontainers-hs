@@ -68,7 +68,7 @@ stateStatus :: State -> Status
 stateStatus (State value) =
   case value
     ^? Optics.key "Status"
-    % Optics._String of
+      % Optics._String of
     Just "created" -> Created
     Just "running" -> Running
     Just "paused" -> Paused
@@ -86,7 +86,7 @@ stateOOMKilled :: State -> Bool
 stateOOMKilled (State value) =
   case value
     ^? Optics.key "OOMKilled"
-    % Optics._Bool of
+      % Optics._Bool of
     Just True -> True
     _ -> False
 
@@ -97,7 +97,7 @@ statePid :: State -> Maybe Int
 statePid (State value) =
   case value
     ^? Optics.key "Pid"
-    % Optics._Integer of
+      % Optics._Integer of
     Just pid -> Just (fromIntegral pid)
     _ -> Nothing
 
@@ -108,7 +108,7 @@ stateExitCode :: State -> Maybe Int
 stateExitCode (State value) =
   case value
     ^? Optics.key "ExitCode"
-    % Optics._Integer of
+      % Optics._Integer of
     Just exitCode -> Just (fromIntegral exitCode)
     _ -> Nothing
 
@@ -119,7 +119,7 @@ stateError :: State -> Maybe Text
 stateError (State value) =
   case value
     ^? Optics.key "Error"
-    % Optics._String of
+      % Optics._String of
     Just err -> Just err
     _ -> Nothing
 
@@ -130,7 +130,7 @@ stateStartedAt :: State -> Maybe Text
 stateStartedAt (State value) =
   case value
     ^? Optics.key "StartedAt"
-    % Optics._String of
+      % Optics._String of
     Just err -> Just err
     _ -> Nothing
 
@@ -141,6 +141,6 @@ stateFinishedAt :: State -> Maybe Text
 stateFinishedAt (State value) =
   case value
     ^? Optics.key "FinishedAt"
-    % Optics._String of
+      % Optics._String of
     Just err -> Just err
     _ -> Nothing

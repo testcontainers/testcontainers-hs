@@ -16,6 +16,7 @@ module TestContainers
     -- * @docker run@ parameters
     M.ContainerRequest,
     M.containerRequest,
+    M.withoutReaper,
     M.setName,
     M.setFixedName,
     M.setSuffixedName,
