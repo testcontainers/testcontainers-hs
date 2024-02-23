@@ -4,7 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module TestContainers.Docker.Reaper
-  ( Reaper(..),
+  ( Reaper (..),
     reaperLabels,
 
     -- * Ryuk based reaper
@@ -22,18 +22,18 @@ import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as Socket
 import qualified System.Random as Random
 
--- | Reaper for safe resource cleanup. This type is exposed to allow users to 
+-- | Reaper for safe resource cleanup. This type is exposed to allow users to
 -- create their own 'Reapers'.
 --
 -- @since 0.5.0.0
 data Reaper = Reaper
-  { -- | Registers a @label = value@ pair for reaping. Reaping happens when 
+  { -- | Registers a @label = value@ pair for reaping. Reaping happens when
     -- closing/de-allocating of the 'Reaper' through 'MonadResource'.
-    register :: 
-      -- | Label
-      Text -> 
-      -- | Value
-      Text -> 
+    register ::
+      -- \| Label
+      Text ->
+      -- \| Value
+      Text ->
       IO (),
     -- | Additional labels to add to any Docker resource on creation. Adding the
     -- labels is necessary in order for the 'Reaper' to find resources for cleanup.

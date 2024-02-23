@@ -75,6 +75,7 @@ module TestContainers.Docker
     -- * Running containers
     ContainerRequest,
     containerRequest,
+    withoutReaper,
     withLabels,
     setName,
     setFixedName,
@@ -220,6 +221,7 @@ import TestContainers.Docker.Internal
     InspectOutput,
     LogConsumer,
     Pipe (..),
+    WithoutReaper (..),
     consoleLogConsumer,
     docker,
     dockerFollowLogs,
@@ -283,6 +285,9 @@ data ContainerRequest = ContainerRequest
     followLogs :: Maybe LogConsumer,
     workDirectory :: Maybe Text
   }
+
+instance WithoutReaper ContainerRequest where
+  withoutReaper request = request {noReaper = True}
 
 -- | Parameters for a naming a Docker container.
 --
@@ -1109,8 +1114,8 @@ internalContainerIp :: Container -> Text
 internalContainerIp Container {id, inspectOutput} =
   case inspectOutput
     ^? Optics.key "NetworkSettings"
-    % Optics.key "IPAddress"
-    % Optics._String of
+      % Optics.key "IPAddress"
+      % Optics._String of
     Nothing ->
       throw $ InspectOutputUnexpected {id}
     Just address ->
