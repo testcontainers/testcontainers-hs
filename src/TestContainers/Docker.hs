@@ -618,7 +618,10 @@ createRyukReaper = do
   ryukContainer <-
     run $
       containerRequest (fromTag ryukImageTag)
-        & skipReaper
+        &
+        -- Ryuk destroys itself once it reaped the resources,
+        -- no need to register itself with itself.
+        withoutReaper
         & setVolumeMounts [(pack dockerSocketLocation, "/var/run/docker.sock")]
         & setExpose [ryukPort]
         & setWaitingFor (waitUntilMappedPortReachable ryukPort)
@@ -628,14 +631,6 @@ createRyukReaper = do
         containerAddress ryukContainer ryukPort
 
   newRyukReaper ryukContainerAddress ryukContainerPort
-
--- | Internal attribute, serving as a loop breaker: When runnign a container
--- we ensure a 'Reaper' is present, since the 'Reaper' itself is a running
--- container we need to break the loop to avoid spinning up a new 'Reaper' for
--- the 'Reaper'.
-skipReaper :: ContainerRequest -> ContainerRequest
-skipReaper request =
-  request {noReaper = True}
 
 -- | Kills a Docker container. `kill` is essentially @docker kill@.
 --
