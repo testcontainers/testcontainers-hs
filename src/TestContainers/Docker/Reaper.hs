@@ -4,7 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module TestContainers.Docker.Reaper
-  ( Reaper,
+  ( Reaper(..),
     reaperLabels,
 
     -- * Ryuk based reaper
@@ -22,13 +22,19 @@ import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as Socket
 import qualified System.Random as Random
 
--- | Reaper for safe resource cleanup.
+-- | Reaper for safe resource cleanup. This type is exposed to allow users to 
+-- create their own 'Reapers'.
 --
 -- @since 0.5.0.0
 data Reaper = Reaper
-  { -- | @runReaper label value@ reaps Docker any Docker resource with a matching
-    -- label.
-    runReaper :: Text -> Text -> IO (),
+  { -- | Registers a @label = value@ pair for reaping. Reaping happens when 
+    -- closing/de-allocating of the 'Reaper' through 'MonadResource'.
+    register :: 
+      -- | Label
+      Text -> 
+      -- | Value
+      Text -> 
+      IO (),
     -- | Additional labels to add to any Docker resource on creation. Adding the
     -- labels is necessary in order for the 'Reaper' to find resources for cleanup.
     labels :: [(Text, Text)]
@@ -88,23 +94,32 @@ newRyukReaper host port = do
               (Socket.addrSocketType address)
               (Socket.addrProtocol address)
           Socket.connect socket (Socket.addrAddress address)
-          pure (socket, runRyuk sessionId (Ryuk socket))
+
+          -- Construct the reaper and regiter the session with it.
+          -- Doing it here intead of in the teardown (like we did before)
+          -- guarantees the Reaper knows about our session.
+          let reaper =
+                newReaper sessionId (Ryuk socket)
+          register reaper sessionIdLabel sessionId
+
+          pure (socket, reaper)
       )
-      ( \(socket, ryuk) -> do
-          runReaper ryuk sessionIdLabel sessionId
+      ( \(socket, _ryuk) -> do
+          -- Tearing down the connection lets Ryuk know it can reap the
+          -- running containers.
           Socket.close socket
       )
 
   pure ryuk
 
-runRyuk ::
+newReaper ::
   -- | Session id
   Text ->
   Ryuk ->
   Reaper
-runRyuk sessionId ryuk =
+newReaper sessionId ryuk =
   Reaper
-    { runReaper = \label value -> do
+    { register = \label value -> do
         Socket.sendAll
           (ryukSocket ryuk)
           ("label=" <> encodeUtf8 label <> "=" <> encodeUtf8 value <> "\n")
