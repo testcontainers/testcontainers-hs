@@ -275,7 +275,7 @@ data ContainerRequest = ContainerRequest
     exposedPorts :: [Port],
     volumeMounts :: [(Text, Text)],
     network :: Maybe (Either Network Text),
-    networkAlias :: Maybe Text,
+    networkAlias :: [Text],
     links :: [ContainerId],
     naming :: NamingStrategy,
     rmOnExit :: Bool,
@@ -310,7 +310,7 @@ containerRequest image =
       exposedPorts = [],
       volumeMounts = [],
       network = Nothing,
-      networkAlias = Nothing,
+      networkAlias = [],
       links = [],
       rmOnExit = False,
       readiness = mempty,
@@ -401,12 +401,13 @@ withNetwork network req =
   req {network = Just (Left network)}
 
 -- | Set the network alias for this container. This is equivalent to passing
--- @--network-alias alias@ to @docker run@.
+-- @--network-alias alias@ to @docker run@. 'withNetworkAlias' can be used more 
+-- than once on a 'ContainerRequest'.
 --
 -- @since 0.5.0.0
 withNetworkAlias :: Text -> ContainerRequest -> ContainerRequest
-withNetworkAlias alias req =
-  req {networkAlias = Just alias}
+withNetworkAlias alias req@ContainerRequest{networkAlias} =
+  req {networkAlias = alias : networkAlias }
 
 -- | Sets labels for a container
 --
@@ -564,7 +565,7 @@ run request = do
             ++ [["--publish", pack (show port) <> "/" <> protocol] | Port {port, protocol} <- exposedPorts]
             ++ [["--network", networkName] | Just (Right networkName) <- [network]]
             ++ [["--network", networkId dockerNetwork] | Just (Left dockerNetwork) <- [network]]
-            ++ [["--network-alias", alias] | Just alias <- [networkAlias]]
+            ++ [["--network-alias", alias] | alias <- networkAlias]
             ++ [["--link", container] | container <- links]
             ++ [["--volume", src <> ":" <> dest] | (src, dest) <- volumeMounts]
             ++ [["--rm"] | rmOnExit]
