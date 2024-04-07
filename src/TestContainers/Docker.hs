@@ -82,6 +82,8 @@ module TestContainers.Docker
     setSuffixedName,
     setRandomName,
     setCmd,
+    setMemory,
+    setCpus,
     setVolumeMounts,
     setRm,
     setEnv,
@@ -276,6 +278,8 @@ data ContainerRequest = ContainerRequest
     volumeMounts :: [(Text, Text)],
     network :: Maybe (Either Network Text),
     networkAlias :: Maybe Text,
+    cpus :: Maybe Text,
+    memory :: Maybe Text,
     links :: [ContainerId],
     naming :: NamingStrategy,
     rmOnExit :: Bool,
@@ -311,6 +315,8 @@ containerRequest image =
       volumeMounts = [],
       network = Nothing,
       networkAlias = Nothing,
+      memory = Nothing,
+      cpus = Nothing,
       links = [],
       rmOnExit = False,
       readiness = mempty,
@@ -362,6 +368,22 @@ setSuffixedName preffix req =
 setCmd :: [Text] -> ContainerRequest -> ContainerRequest
 setCmd newCmd req =
   req {cmd = Just newCmd}
+
+-- | Set the memory limit of a Docker container. This is equivalent to
+-- invoking @docker run@ with the @--memory@ parameter.
+--
+-- @since x.x.x.x
+setMemory :: Text -> ContainerRequest -> ContainerRequest
+setMemory newMemory req =
+  req {memory = Just newMemory}
+
+-- | Set the cpus limit of a Docker container. This is equivalent to
+-- invoking @docker run@ with the @--cpus@ parameter.
+--
+-- @since x.x.x.x
+setCpus :: Text -> ContainerRequest -> ContainerRequest
+setCpus newCpus req =
+  req {cpus = Just newCpus}
 
 -- | The volume mounts to link to Docker container. This is the equivalent
 -- of passing the command on the @docker run -v@ invocation.
@@ -525,6 +547,8 @@ run request = do
           volumeMounts,
           network,
           networkAlias,
+          memory,
+          cpus,
           links,
           rmOnExit,
           readiness,
@@ -569,6 +593,8 @@ run request = do
             ++ [["--volume", src <> ":" <> dest] | (src, dest) <- volumeMounts]
             ++ [["--rm"] | rmOnExit]
             ++ [["--workdir", workdir] | Just workdir <- [workDirectory]]
+            ++ [["--memory", value] | Just value <- [memory]]
+            ++ [["--cpus", value] | Just value <- [cpus]]
             ++ [[tag]]
             ++ [command | Just command <- [cmd]]
 
