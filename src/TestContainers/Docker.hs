@@ -65,6 +65,7 @@ module TestContainers.Docker
     -- * Referring to images
     ToImage,
     fromTag,
+    fromImageId,
     fromBuildContext,
     fromDockerfile,
     build,
@@ -746,7 +747,7 @@ defaultToImage action =
     { runToImage = action
     }
 
--- | Get an `Image` from a tag.
+-- | Get an `Image` from a tag. This runs @docker pull --quiet <tag>@ to obtain an image id.
 --
 -- @since 0.1.0.0
 fromTag :: ImageTag -> ToImage
@@ -757,6 +758,15 @@ fromTag tag = defaultToImage $ do
     Image
       { tag = strip (pack output)
       }
+
+-- | Get an `Image` from an image id. This doesn't run @docker pull@ or any other Docker command
+-- on construction.
+--
+-- @since x.x.x.x
+fromImageId :: Text -> ToImage
+fromImageId imageId =
+  defaultToImage $
+    pure Image {tag = imageId}
 
 -- | Build the image from a build path and an optional path to the
 -- Dockerfile (default is Dockerfile)

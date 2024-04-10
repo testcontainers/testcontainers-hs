@@ -10,6 +10,7 @@ module TestContainers
     -- * Referring to Docker images
     M.ToImage,
     M.fromTag,
+    M.fromImageId,
     M.fromBuildContext,
     M.build,
 

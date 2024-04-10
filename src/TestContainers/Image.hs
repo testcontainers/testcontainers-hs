@@ -16,6 +16,7 @@ import TestContainers.Docker as Docker
     build,
     fromBuildContext,
     fromDockerfile,
+    fromImageId,
     fromTag,
   )
 
