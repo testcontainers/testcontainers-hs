@@ -14,6 +14,7 @@ where
 
 import Control.Exception (IOException)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.IP (IP)
 import Data.Text (Text)
 import System.Exit (ExitCode)
 
@@ -35,9 +36,9 @@ data Trace
     -- timeout to wait (in seconds).
     TraceWaitUntilReady (Maybe Int)
   | -- | Opening socket
-    TraceOpenSocket Text Int (Maybe IOException)
+    TraceOpenSocket IP Int (Maybe IOException)
   | -- | Call HTTP endpoint
-    TraceHttpCall Text Int (Either String Int)
+    TraceHttpCall IP Int (Either String Int)
   deriving stock (Eq, Show)
 
 -- | Traces execution within testcontainers library.

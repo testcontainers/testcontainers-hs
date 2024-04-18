@@ -181,6 +181,7 @@ import Data.Aeson (decode')
 import qualified Data.Aeson.Optics as Optics
 import qualified Data.ByteString.Lazy.Char8 as LazyByteString
 import Data.Function ((&))
+import Data.IP (IP (..), fromSockAddr)
 import Data.List (find, stripPrefix)
 import Data.Maybe (fromMaybe)
 import Data.String (IsString (..))
@@ -203,6 +204,7 @@ import Network.HTTP.Client
   )
 import Network.HTTP.Types (statusCode)
 import qualified Network.Socket as Socket
+import Optics.AffineFold (filtered)
 import Optics.Fold (pre)
 import Optics.Operators ((^?))
 import Optics.Optic ((%), (<&>))
@@ -618,13 +620,20 @@ run request = do
   forM_ followLogs $
     dockerFollowLogs configTracer id
 
+  -- TODO: support non-localhost docker hosts
+  hostSockAddr <-
+    liftIO $
+      (Socket.addrAddress . head) <$> Socket.getAddrInfo (Just Socket.defaultHints) (Just "localhost") Nothing
+  let hostIp = maybe (Prelude.error "failed to deduce Docker host address") fst $ fromSockAddr hostSockAddr
+
   let container =
         Container
           { id,
             releaseKey,
             image,
             inspectOutput,
-            config
+            config,
+            hostIp
           }
 
   -- Last but not least, execute the WaitUntilReady checks
@@ -933,9 +942,13 @@ waitForHttp port path acceptableStatusCodes = WaitReady $ \container -> do
       retry manager = do
         let (endpointHost, endpointPort) =
               containerAddress container port
+            endpointHostText = pack $ case endpointHost of
+              IPv4 addr -> show addr
+              -- Ugly, but http-client expects IPv6 address to be wrapped by '[]'
+              IPv6 addr -> "[" <> show addr <> "]"
         let request =
               defaultRequest
-                { host = encodeUtf8 endpointHost,
+                { host = encodeUtf8 endpointHostText,
                   port = endpointPort,
                   path = encodeUtf8 (pack path)
                 }
@@ -988,8 +1001,7 @@ waitUntilMappedPortReachable port = WaitReady $ \container -> do
         wait = do
           let (endpointHost, endpointPort) =
                 containerAddress container port
-
-          result <- try (resolve (unpack endpointHost) endpointPort >>= open)
+          result <- try (resolve (show endpointHost) endpointPort >>= open)
           case result of
             Right socket -> do
               withTrace configTracer (TraceOpenSocket endpointHost endpointPort Nothing)
@@ -1109,7 +1121,14 @@ data Container = Container
     -- | Configuration used to create and run this container.
     config :: Config,
     -- | Memoized output of `docker inspect`. This is being calculated lazily.
-    inspectOutput :: InspectOutput
+    inspectOutput :: InspectOutput,
+    -- | Docker host address running the container.
+    --
+    -- Currently stores 'head <$> getAddrInfo ... (Just "localhost") ...' result.
+    -- This addr is later used to deduce the correct port in port mapping.
+    -- Host IP is deduced at container creation time since helpers like 'containerAddress'
+    -- are pure and host is not going to change over time.
+    hostIp :: IP
   }
 
 -- | Returns the id of the container.
@@ -1175,6 +1194,27 @@ containerAlias Container {id, inspectOutput} =
     Just alias ->
       alias
 
+-- | Get the container's network IP address.
+-- Takes the IP address from the first network found.
+--
+-- @since x.x.x.x
+containerIPAddress :: Container -> IP
+containerIPAddress Container {id, inspectOutput} =
+  case inspectOutput
+    ^? pre
+      ( Optics.key "NetworkSettings"
+          % Optics.key "Networks"
+          % Optics.members
+          % Optics.key "IPAddress"
+          % Optics._String
+      ) of
+    Nothing ->
+      throw $
+        InspectOutputMissingNetwork
+          { id
+          }
+    Just ipRaw -> read $ unpack ipRaw
+
 -- | Get the IP address for the container's gateway, i.e. the host.
 -- Takes the first gateway address found.
 --
@@ -1201,20 +1241,30 @@ containerGateway Container {id, inspectOutput} =
 --
 -- @since 0.1.0.0
 containerPort :: Container -> Port -> Int
-containerPort Container {id, inspectOutput} Port {port, protocol} =
+containerPort Container {id, inspectOutput, hostIp} Port {port, protocol} =
   let -- TODO also support UDP ports
       -- Using IsString so it works both with Text (aeson<2) and Aeson.Key (aeson>=2)
       textPort :: (IsString s) => s
       textPort = fromString $ show port <> "/" <> unpack protocol
-   in -- TODO be more mindful, make sure to grab the
-      -- port from the right host address
 
-      case inspectOutput
+      -- check if the current 'HostIp' matches the hostIp
+      -- if 'HostIp' is '0.0.0.0' or '::', we need to check that we match protocol
+      -- otherwise, check that we match host address
+      matchAnyIPv4 = IPv4 $ read "0.0.0.0"
+      matchAnyIPv6 = IPv6 $ read "::"
+      matchHost v = fromMaybe False $ do
+        bindHostIp :: IP <- (read . unpack) <$> v ^? Optics.key "HostIp" % Optics._String
+        return $ case bindHostIp of
+          IPv4 _ | bindHostIp == matchAnyIPv4 -> True
+          IPv6 _ | bindHostIp == matchAnyIPv6 -> True
+          _ -> hostIp == bindHostIp
+   in case inspectOutput
         ^? pre
           ( Optics.key "NetworkSettings"
               % Optics.key "Ports"
               % Optics.key textPort
               % Optics.values
+              % filtered matchHost
               % Optics.key "HostPort"
               % Optics._String
           ) of
@@ -1233,12 +1283,12 @@ containerPort Container {id, inspectOutput} Port {port, protocol} =
 -- 'containerAddress' will use the exposed port on the Docker host.
 --
 -- @since 0.5.0.0
-containerAddress :: Container -> Port -> (Text, Int)
+containerAddress :: Container -> Port -> (IP, Int)
 containerAddress container Port {port, protocol} =
   let inDocker = unsafePerformIO isRunningInDocker
    in if inDocker
-        then (containerAlias container, port)
-        else ("localhost", containerPort container (Port {port, protocol}))
+        then (containerIPAddress container, port)
+        else (hostIp container, containerPort container (Port {port, protocol}))
 
 -- | Runs the `docker inspect` command. Memoizes the result.
 --
