@@ -16,8 +16,7 @@ where
 
 import Control.Monad (replicateM)
 import Control.Monad.Trans.Resource (MonadResource, allocate)
-import Data.IP (IP)
-import Data.Text (Text, pack)
+import Data.Text (Text, pack, unpack)
 import Data.Text.Encoding (encodeUtf8)
 import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as Socket
@@ -74,7 +73,7 @@ ryukPort =
 newRyukReaper ::
   (MonadResource m) =>
   -- | Host
-  IP ->
+  Text ->
   -- | Port
   Int ->
   m Reaper
@@ -88,7 +87,7 @@ newRyukReaper host port = do
           let hints =
                 Socket.defaultHints {Socket.addrSocketType = Socket.Stream}
           address <-
-            head <$> Socket.getAddrInfo (Just hints) (Just (show host)) (Just (show port))
+            head <$> Socket.getAddrInfo (Just hints) (Just (unpack host)) (Just (show port))
           socket <-
             Socket.socket
               (Socket.addrFamily address)

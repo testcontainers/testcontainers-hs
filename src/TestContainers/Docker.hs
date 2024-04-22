@@ -267,6 +267,7 @@ import TestContainers.Monad
     TestContainer,
   )
 import TestContainers.Trace (Trace (..), Tracer, newTracer, withTrace)
+import Text.Read (readMaybe)
 import Prelude hiding (error, id)
 import qualified Prelude
 
@@ -942,10 +943,10 @@ waitForHttp port path acceptableStatusCodes = WaitReady $ \container -> do
       retry manager = do
         let (endpointHost, endpointPort) =
               containerAddress container port
-            endpointHostText = pack $ case endpointHost of
-              IPv4 addr -> show addr
+            endpointHostText = case readMaybe $ unpack endpointHost of
               -- Ugly, but http-client expects IPv6 address to be wrapped by '[]'
-              IPv6 addr -> "[" <> show addr <> "]"
+              Just (IPv6 _) -> "[" <> endpointHost <> "]"
+              _ -> endpointHost
         let request =
               defaultRequest
                 { host = encodeUtf8 endpointHostText,
@@ -1001,7 +1002,7 @@ waitUntilMappedPortReachable port = WaitReady $ \container -> do
         wait = do
           let (endpointHost, endpointPort) =
                 containerAddress container port
-          result <- try (resolve (show endpointHost) endpointPort >>= open)
+          result <- try (resolve (unpack endpointHost) endpointPort >>= open)
           case result of
             Right socket -> do
               withTrace configTracer (TraceOpenSocket endpointHost endpointPort Nothing)
@@ -1283,12 +1284,12 @@ containerPort Container {id, inspectOutput, hostIp} Port {port, protocol} =
 -- 'containerAddress' will use the exposed port on the Docker host.
 --
 -- @since 0.5.0.0
-containerAddress :: Container -> Port -> (IP, Int)
+containerAddress :: Container -> Port -> (Text, Int)
 containerAddress container Port {port, protocol} =
   let inDocker = unsafePerformIO isRunningInDocker
    in if inDocker
-        then (containerIPAddress container, port)
-        else (hostIp container, containerPort container (Port {port, protocol}))
+        then (pack $ show $ containerIPAddress container, port)
+        else (pack $ show $ hostIp container, containerPort container (Port {port, protocol}))
 
 -- | Runs the `docker inspect` command. Memoizes the result.
 --
