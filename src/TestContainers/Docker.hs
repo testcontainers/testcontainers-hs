@@ -8,6 +8,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -94,6 +95,7 @@ module TestContainers.Docker
     setLink,
     setExpose,
     setWaitingFor,
+    withDependencies,
     run,
 
     -- * Following logs
@@ -158,7 +160,8 @@ module TestContainers.Docker
 where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (IOException, throw)
+import qualified Control.Concurrent.Async
+import Control.Exception (IOException, evaluate, throw)
 import Control.Monad (forM_, replicateM, unless)
 import Control.Monad.Catch
   ( Exception,
@@ -169,11 +172,12 @@ import Control.Monad.Catch
     try,
   )
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.IO.Unlift (MonadUnliftIO (withRunInIO))
+import Control.Monad.IO.Unlift (MonadUnliftIO (withRunInIO), askRunInIO)
 import Control.Monad.Reader (MonadReader (..))
 import Control.Monad.Trans.Resource
   ( ReleaseKey,
     ResIO,
+    allocate,
     register,
     runResourceT,
   )
@@ -209,12 +213,13 @@ import Optics.Optic ((%), (<&>))
 import System.Directory (doesFileExist)
 import System.Environment (lookupEnv)
 import System.IO (Handle, hClose)
-import System.IO.Unsafe (unsafePerformIO)
+import System.IO.Unsafe (unsafeInterleaveIO, unsafePerformIO)
 import qualified System.Process as Process
 import qualified System.Random as Random
 import System.Timeout (timeout)
 import TestContainers.Config
   ( Config (..),
+    RunStrategy (..),
     defaultDockerConfig,
     determineConfig,
   )
@@ -263,6 +268,7 @@ import TestContainers.Docker.State
 import TestContainers.Monad
   ( MonadDocker,
     TestContainer,
+    defer,
   )
 import TestContainers.Trace (Trace (..), Tracer, newTracer, withTrace)
 import Prelude hiding (error, id)
@@ -288,7 +294,8 @@ data ContainerRequest = ContainerRequest
     labels :: [(Text, Text)],
     noReaper :: Bool,
     followLogs :: Maybe LogConsumer,
-    workDirectory :: Maybe Text
+    workDirectory :: Maybe Text,
+    dependencies :: [Container]
   }
 
 instance WithoutReaper ContainerRequest where
@@ -324,7 +331,8 @@ containerRequest image =
       labels = mempty,
       noReaper = False,
       followLogs = Nothing,
-      workDirectory = Nothing
+      workDirectory = Nothing,
+      dependencies = []
     }
 
 -- | Set the name of a Docker container. This is equivalent to invoking @docker run@
@@ -453,6 +461,13 @@ withFollowLogs :: LogConsumer -> ContainerRequest -> ContainerRequest
 withFollowLogs logConsumer request =
   request {followLogs = Just logConsumer}
 
+-- |
+--
+-- @since x.x.x
+withDependencies :: [Container] -> ContainerRequest -> ContainerRequest
+withDependencies dependencies request =
+  request {dependencies}
+
 -- | Defintion of a 'Port'. Allows for specifying ports using various protocols. Due to the
 -- 'Num' and 'IsString' instance allows for convenient Haskell literals.
 --
@@ -556,7 +571,8 @@ run request = do
           labels,
           noReaper,
           followLogs,
-          workDirectory
+          workDirectory,
+          dependencies
         } = request
 
   config@Config {configTracer, configCreateReaper} <-
@@ -568,8 +584,6 @@ run request = do
         pure []
       else reaperLabels <$> configCreateReaper
 
-  image@Image {tag} <- runToImage toImage
-
   name <-
     case naming of
       RandomName -> return Nothing
@@ -578,59 +592,110 @@ run request = do
         Just . (prefix <>) . ("-" <>) . pack
           <$> replicateM 6 (Random.randomRIO ('a', 'z'))
 
-  let dockerRun :: [Text]
-      dockerRun =
-        concat $
-          [["run"]]
-            ++ [["--detach"]]
-            ++ [["--name", containerName] | Just containerName <- [name]]
-            ++ [["--label", label <> "=" <> value] | (label, value) <- additionalLabels ++ labels]
-            ++ [["--env", variable <> "=" <> value] | (variable, value) <- env]
-            ++ [["--publish", pack (show port) <> "/" <> protocol] | Port {port, protocol} <- exposedPorts]
-            ++ [["--network", networkName] | Just (Right networkName) <- [network]]
-            ++ [["--network", networkId dockerNetwork] | Just (Left dockerNetwork) <- [network]]
-            ++ [["--network-alias", alias] | Just alias <- [networkAlias]]
-            ++ [["--link", container] | container <- links]
-            ++ [["--volume", src <> ":" <> dest] | (src, dest) <- volumeMounts]
-            ++ [["--rm"] | rmOnExit]
-            ++ [["--workdir", workdir] | Just workdir <- [workDirectory]]
-            ++ [["--memory", value] | Just value <- [memory]]
-            ++ [["--cpus", value] | Just value <- [cpus]]
-            ++ [[tag]]
-            ++ [command | Just command <- [cmd]]
+  (actuallyRunDocker, waitOnContainer) <- applyRunStrategy $ do
+    image@Image {tag} <- runToImage toImage
 
-  stdout <- docker configTracer dockerRun
+    liftIO $
+      forM_ dependencies $
+        \Container {wait} -> wait
 
-  let id :: ContainerId
-      !id =
-        -- N.B. Force to not leak STDOUT String
-        strip (pack stdout)
+    let dockerRun :: [Text]
+        dockerRun =
+          concat $
+            [["run"]]
+              ++ [["--detach"]]
+              ++ [["--name", containerName] | Just containerName <- [name]]
+              ++ [["--label", label <> "=" <> value] | (label, value) <- additionalLabels ++ labels]
+              ++ [["--env", variable <> "=" <> value] | (variable, value) <- env]
+              ++ [["--publish", pack (show port) <> "/" <> protocol] | Port {port, protocol} <- exposedPorts]
+              ++ [["--network", networkName] | Just (Right networkName) <- [network]]
+              ++ [["--network", networkId dockerNetwork] | Just (Left dockerNetwork) <- [network]]
+              ++ [["--network-alias", alias] | Just alias <- [networkAlias]]
+              ++ [["--link", container] | container <- links]
+              ++ [["--volume", src <> ":" <> dest] | (src, dest) <- volumeMounts]
+              ++ [["--rm"] | rmOnExit]
+              ++ [["--workdir", workdir] | Just workdir <- [workDirectory]]
+              ++ [["--memory", value] | Just value <- [memory]]
+              ++ [["--cpus", value] | Just value <- [cpus]]
+              ++ [[tag]]
+              ++ [command | Just command <- [cmd]]
 
-      -- Careful, this is really meant to be lazy
-      ~inspectOutput =
-        unsafePerformIO $
-          internalInspect configTracer id
+    stdout <- docker configTracer dockerRun
 
-  -- We don't issue 'ReleaseKeys' for cleanup anymore. Ryuk takes care of cleanup
-  -- for us once the session has been closed.
-  releaseKey <- register (pure ())
+    let id :: ContainerId
+        !id =
+          -- N.B. Force to not leak STDOUT String
+          strip (pack stdout)
 
-  forM_ followLogs $
-    dockerFollowLogs configTracer id
+        -- Careful, this is really meant to be lazy
+        ~inspectOutput =
+          unsafePerformIO $
+            internalInspect configTracer id
 
-  let container =
-        Container
-          { id,
-            releaseKey,
-            image,
-            inspectOutput,
-            config
+    -- We don't issue 'ReleaseKeys' for cleanup anymore. Ryuk takes care of cleanup
+    -- for us once the session has been closed.
+    releaseKey <- register (pure ())
+
+    forM_ followLogs $
+      dockerFollowLogs configTracer id
+
+    let container =
+          Container
+            { id,
+              releaseKey,
+              image,
+              inspectOutput,
+              config,
+              wait = pure ()
+            }
+
+    -- Last but not least, execute the WaitUntilReady checks
+    waitUntilReady container readiness
+
+    pure container
+
+  -- We want to be very gentle and not force the container if possible so that we can
+  -- install the wait action.
+  ~container <-
+    actuallyRunDocker
+
+  pure $
+    let ~Container {..} = container
+     in Container
+          { wait = waitOnContainer,
+            ..
           }
 
-  -- Last but not least, execute the WaitUntilReady checks
-  waitUntilReady container readiness
+applyRunStrategy ::
+  TestContainer a ->
+  TestContainer (TestContainer a, IO ())
+applyRunStrategy action = do
+  Config {configTracer, configRunStrategy} <-
+    ask
+  case configRunStrategy of
+    SequentialRunStrategy ->
+      pure (action, pure ())
+    ConcurrentRunStrategy _limit -> do
+      runInIO <-
+        askRunInIO
 
-  pure container
+      (_releaseKey, handle) <-
+        allocate
+          (Control.Concurrent.Async.async (runInIO action))
+          Control.Concurrent.Async.cancel
+
+      let returnAction =
+            liftIO $ unsafeInterleaveIO $ do
+              Control.Concurrent.Async.wait handle
+
+          waitAction = do
+            withTrace configTracer TraceWaitOnDependency
+            _ <- Control.Concurrent.Async.wait handle
+            pure ()
+
+      defer waitAction
+
+      pure (returnAction, waitAction)
 
 -- | Sets up a Ryuk 'Reaper'.
 --
@@ -1109,7 +1174,9 @@ data Container = Container
     -- | Configuration used to create and run this container.
     config :: Config,
     -- | Memoized output of `docker inspect`. This is being calculated lazily.
-    inspectOutput :: InspectOutput
+    inspectOutput :: InspectOutput,
+    -- | Wait on the container as a dependency.
+    wait :: IO ()
   }
 
 -- | Returns the id of the container.

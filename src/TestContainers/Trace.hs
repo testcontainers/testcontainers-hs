@@ -38,6 +38,8 @@ data Trace
     TraceOpenSocket Text Int (Maybe IOException)
   | -- | Call HTTP endpoint
     TraceHttpCall Text Int (Either String Int)
+  | -- | Waiting on a dependency
+    TraceWaitOnDependency
   deriving stock (Eq, Show)
 
 -- | Traces execution within testcontainers library.

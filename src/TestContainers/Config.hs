@@ -1,5 +1,6 @@
 module TestContainers.Config
-  ( Config (..),
+  ( RunStrategy (..),
+    Config (..),
     defaultConfig,
     defaultDockerConfig,
     determineConfig,
@@ -7,7 +8,7 @@ module TestContainers.Config
 where
 
 import {-# SOURCE #-} TestContainers.Docker (createRyukReaper)
-import TestContainers.Monad (Config (..))
+import TestContainers.Monad (Config (..), RunStrategy (..))
 
 -- | Default configuration.
 --
@@ -17,7 +18,8 @@ defaultConfig =
   Config
     { configDefaultWaitTimeout = Just 60,
       configTracer = mempty,
-      configCreateReaper = createRyukReaper
+      configCreateReaper = createRyukReaper,
+      configRunStrategy = SequentialRunStrategy
     }
 
 -- | Default configuration.
