@@ -1,3 +1,4 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 -- |
 -- This module shall be used as entrypoint to the testcontainers library. It exports
 -- all the necessary types and functions for most common use-cases.
