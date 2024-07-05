@@ -30,18 +30,25 @@ import TestContainers.Monad (runTestContainer)
 -- initialization and de-initialization of the containers.
 --
 -- @
+-- data ContainerPorts = ContainerPorts {
+--   redisPort :: Int,
+--   kafkaPort :: Int
+-- }
 --
--- containers :: MonadDocker m => m Boolean
+-- containers :: MonadDocker m => m ContainerPorts
 -- containers = do
---   _redis <- TestContainers.run $ TestContainers.containerRequest TestContainers.redis
---   _kafka <- TestContainers.run $ TestContainers.containerRequest TestContainers.kafka
---   pure True
+--   redis <- TestContainers.run $ TestContainers.containerRequest TestContainers.redis
+--   kafka <- TestContainers.run $ TestContainers.containerRequest TestContainers.kafka
+--   pure ContainerPorts {
+--     redisPort = TestContainers.containerPort redis "6379/tcp",
+--     kafkaPort = TestContainers.containerPort kafka "9092/tcp"
+--   }
 --
 -- example :: Spec
 -- example =
 --   around (withContainers containers) $ describe "Example tests"
---     it "first test" $ \\isBoolean -> do
---       isBoolean `shouldBe` True
+--     it "some test that uses redis and kafka" $ \ContainerPorts{redisPort, kafkaPort} -> do
+--       redisPort `shouldNotBe` kafkaPort
 -- @
 --
 -- `withContainers` allows you naturally scope the handling of containers for your tests.
