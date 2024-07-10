@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -27,6 +28,7 @@ import TestContainers.Tasty
     waitUntilMappedPortReachable,
     waitUntilTimeout,
     withContainers,
+    withDependencies,
     withFollowLogs,
     withNetwork,
     (&),
@@ -48,7 +50,7 @@ containers1 = do
               waitUntilMappedPortReachable 6379
           )
 
-  _rabbitmq <-
+  rabbitmq <-
     run $
       containerRequest (fromTag "rabbitmq:3.8.4")
         & setRm False
@@ -60,7 +62,7 @@ containers1 = do
               <> waitUntilMappedPortReachable 5672
           )
 
-  _nginx <-
+  nginx <-
     run $
       containerRequest (fromTag "nginx:1.23.1-alpine")
         & setExpose [80]
@@ -75,6 +77,7 @@ containers1 = do
       containerRequest (fromTag "jaegertracing/all-in-one:1.6")
         & setExpose ["5775/udp", "6831/udp", "6832/udp", "5778", "16686/tcp"]
         & withNetwork net
+        & withDependencies [nginx]
         & setWaitingFor
           (waitForHttp "16686/tcp" "/" [200])
 
@@ -83,7 +86,11 @@ containers1 = do
       containerRequest (fromTag "hello-world:latest")
         & setWaitingFor (waitForState successfulExit)
 
-  _test <- run $ containerRequest (fromBuildContext "./test/container1" Nothing)
+  _test <-
+    run $
+      containerRequest (fromBuildContext "./test/container1" Nothing)
+        & withDependencies [rabbitmq]
+        & setWaitingFor (waitForState successfulExit)
 
   pure ()
 

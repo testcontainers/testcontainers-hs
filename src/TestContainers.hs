@@ -37,6 +37,7 @@ module TestContainers
     M.setExpose,
     M.setWaitingFor,
     M.withFollowLogs,
+    M.withDependencies,
 
     -- * Logs
     M.LogConsumer,
