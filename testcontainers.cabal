@@ -84,7 +84,7 @@ test-suite tests
       base
     , hspec           >=2.0   && <3.0
     , tasty
-    , tasty-discover  >=4.2.1 && <4.3
+    , tasty-discover  >=4.2.1 && <6
     , tasty-hspec
     , tasty-hunit
     , testcontainers
