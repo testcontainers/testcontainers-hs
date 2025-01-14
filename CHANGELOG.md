@@ -6,6 +6,12 @@
 
 * Add `fromExistingNetwork` to allow connecting containers to existing, unmanaged networks (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/41)
 
+* Add `setMemory` to limit the memory of a Docker container;
+
+* Add `setCpus` to limit the CPUs limit of a docker container;
+
+* Add `fromImageId` to get an `Image` from an image id;
+
 ## 0.5.0.0 -- 2023-02-20
 
 * BREAKING: Refined lifecycle management. testcontainers is now using testcontainers/ryuk resource reaper to cleanup containers, networks and volumes. Release keys for containers are deprecated. (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/33)

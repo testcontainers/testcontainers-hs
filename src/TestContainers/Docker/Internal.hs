@@ -48,7 +48,7 @@ class WithoutReaper request where
   -- | Do not register the docker resource (container, register, etc.) with the resource reaper.
   -- Careful, doing this will make your container leak on shutdown if not explicitly stopped.
   --
-  -- @since x.x.x
+  -- @since 0.5.1.0
   withoutReaper :: request -> request
 
 -- | Identifies a network within the Docker runtime. Assigned by @docker network create@
