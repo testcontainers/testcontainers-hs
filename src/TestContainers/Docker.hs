@@ -373,7 +373,7 @@ setCmd newCmd req =
 -- | Set the memory limit of a Docker container. This is equivalent to
 -- invoking @docker run@ with the @--memory@ parameter.
 --
--- @since x.x.x.x
+-- @since 0.5.1.0
 setMemory :: Text -> ContainerRequest -> ContainerRequest
 setMemory newMemory req =
   req {memory = Just newMemory}
@@ -381,7 +381,7 @@ setMemory newMemory req =
 -- | Set the cpus limit of a Docker container. This is equivalent to
 -- invoking @docker run@ with the @--cpus@ parameter.
 --
--- @since x.x.x.x
+-- @since 0.5.1.0
 setCpus :: Text -> ContainerRequest -> ContainerRequest
 setCpus newCpus req =
   req {cpus = Just newCpus}
@@ -762,7 +762,7 @@ fromTag tag = defaultToImage $ do
 -- | Get an `Image` from an image id. This doesn't run @docker pull@ or any other Docker command
 -- on construction.
 --
--- @since x.x.x.x
+-- @since 0.5.1.0
 fromImageId :: Text -> ToImage
 fromImageId imageId =
   defaultToImage $
