@@ -410,7 +410,7 @@ setEnv newEnv req =
 
 -- | Sets the working directory inside the container.
 --
--- @since x.x.x
+-- @since 0.5.1.0
 withWorkingDirectory :: Text -> ContainerRequest -> ContainerRequest
 withWorkingDirectory workdir request =
   request {workDirectory = Just workdir}

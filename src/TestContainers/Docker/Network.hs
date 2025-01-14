@@ -85,7 +85,7 @@ withDriver driver request =
 -- not managed by the 'TestContainer' monad and as such is not being cleaned up
 -- afterwards.
 --
--- @since x.x.x
+-- @since 0.5.1.0
 fromExistingNetwork :: NetworkId -> TestContainer Network
 fromExistingNetwork id =
   pure Network {id}
