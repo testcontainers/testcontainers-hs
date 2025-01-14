@@ -1,6 +1,6 @@
 # Revision history for testcontainer-hs
 
-## x.x.x -- 2023-xx-xx
+## 0.5.1.0 -- 2025-01-14
 
 * Introduce `withWorkingDirectory` to set the working directory inside a container (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/37)
 
