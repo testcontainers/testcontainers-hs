@@ -41,6 +41,9 @@ library
     TestContainers.Tasty
     TestContainers.Trace
 
+  default-extensions:
+    DuplicateRecordFields
+
   -- other-modules:
   -- other-extensions:
   build-depends:

@@ -4,6 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -13,12 +14,19 @@ module TestContainers.Monad
     TestContainer,
     runTestContainer,
 
+    -- * Blocking during concurrent execution
+    defer,
+
     -- * Runtime configuration
+    RunStrategy (..),
     Config (..),
   )
 where
 
 import Control.Applicative (liftA2)
+import qualified Control.Concurrent.Async
+import Control.Exception (evaluate)
+import Control.Monad (sequence_)
 import Control.Monad.Catch
   ( MonadCatch,
     MonadMask,
@@ -26,21 +34,42 @@ import Control.Monad.Catch
   )
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.IO.Unlift (MonadUnliftIO (..))
+import Control.Monad.IO.Unlift (MonadUnliftIO (..), askRunInIO)
 import Control.Monad.Reader (MonadReader (..), ReaderT, runReaderT)
-import Control.Monad.Trans.Resource (MonadResource, ResourceT, runResourceT)
+import qualified Control.Monad.Trans.Resource
 import Data.IORef (newIORef, readIORef, writeIORef)
+import qualified Data.IORef
+import qualified System.IO.Unsafe
 import TestContainers.Docker.Reaper (Reaper)
 import TestContainers.Trace (Tracer)
 
-newtype TestContainerEnv = TestContainerEnv
-  { config :: Config
+data RunStrategy
+  = -- | Run containers sequentially. This is the default behaviour of the runtime.
+    --
+    -- @since x.x.x
+    SequentialRunStrategy
+  | -- | Run and resolve graph of containers concurrently. This requires explicit
+    -- dependency annotations across the container graph.
+    --
+    -- An optional limit on concurrent @docker run@ invocations can be provided.
+    --
+    -- @since x.x.x
+    ConcurrentRunStrategy (Maybe Int)
+
+data TestContainerEnv = TestContainerEnv
+  { config :: Config,
+    -- | In the concurrent run strategy we need a way to block execution until every
+    -- container is done running. This barrier is used at the end of the execution and
+    -- blocks for them to finish.
+    barrierRef :: Data.IORef.IORef [IO ()]
   }
 
 -- | The heart and soul of the testcontainers library.
 --
 -- @since 0.5.0.0
-newtype TestContainer a = TestContainer {unTestContainer :: ReaderT TestContainerEnv (ResourceT IO) a}
+newtype TestContainer a = TestContainer
+  { unTestContainer :: ReaderT TestContainerEnv (Control.Monad.Trans.Resource.ResourceT IO) a
+  }
   deriving newtype
     ( Functor,
       Applicative,
@@ -49,7 +78,7 @@ newtype TestContainer a = TestContainer {unTestContainer :: ReaderT TestContaine
       MonadMask,
       MonadCatch,
       MonadThrow,
-      MonadResource,
+      Control.Monad.Trans.Resource.MonadResource,
       MonadFix
     )
 
@@ -94,17 +123,34 @@ runTestContainer config action = do
             liftIO (writeIORef reaperRef (Just reaper))
             pure reaper
 
-  runResourceT
-    ( runReaderT
+  barrierRef <- newIORef []
+
+  Control.Monad.Trans.Resource.runResourceT $ do
+    result <-
+      runReaderT
         (unTestContainer action)
         ( TestContainerEnv
-            { config =
+            { barrierRef,
+              config =
                 config
                   { configCreateReaper = getOrCreateReaper
                   }
             }
         )
-    )
+
+    -- Take the barrier and wait for execution
+    liftIO $ do
+      barrier <- readIORef barrierRef
+      sequence_ barrier
+
+    pure result
+
+defer :: IO () -> TestContainer ()
+defer action = TestContainer $ do
+  TestContainerEnv {barrierRef} <- ask
+  liftIO $ do
+    barrier <- readIORef barrierRef
+    writeIORef barrierRef $! action : barrier
 
 -- | Docker related functionality is parameterized over this `Monad`. Since 0.5.0.0 this is
 -- just a type alias for @m ~ 'TestContainer'@.
@@ -125,5 +171,9 @@ data Config = Config
     -- | Traces execution inside testcontainers library.
     configTracer :: Tracer,
     -- | How to obtain a 'Reaper'
-    configCreateReaper :: TestContainer Reaper
+    configCreateReaper :: TestContainer Reaper,
+    -- |
+    --
+    -- @since x.x.x
+    configRunStrategy :: RunStrategy
   }

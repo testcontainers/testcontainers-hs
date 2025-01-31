@@ -43,7 +43,25 @@ import Test.Tasty.Options
 import TestContainers as Reexports hiding
   ( Trace,
   )
-import TestContainers.Monad (runTestContainer)
+import TestContainers.Monad (RunStrategy (..), runTestContainer)
+
+newtype ConcurrentRunStrategyOption = ConcurrentRunStrategyOption Bool
+
+instance IsOption ConcurrentRunStrategyOption where
+  defaultValue =
+    ConcurrentRunStrategyOption False
+
+  parseValue =
+    const Nothing
+
+  optionCLParser =
+    mkFlagCLParser mempty (ConcurrentRunStrategyOption True)
+
+  optionName =
+    pure "testcontainers-run-concurrently"
+
+  optionHelp =
+    pure "Execute 'docker run' concurrently, where possible"
 
 newtype DefaultTimeout = DefaultTimeout (Maybe Int)
 
@@ -91,7 +109,8 @@ ingredient :: Ingredient
 ingredient =
   Tasty.includingOptions
     [ Option (Proxy :: Proxy DefaultTimeout),
-      Option (Proxy :: Proxy Trace)
+      Option (Proxy :: Proxy Trace),
+      Option (Proxy :: Proxy ConcurrentRunStrategyOption)
     ]
 
 withContainers ::
@@ -102,47 +121,53 @@ withContainers ::
 withContainers startContainers tests =
   askOption $ \(DefaultTimeout defaultTimeout) ->
     askOption $ \(Trace enableTrace) ->
-      let tracer :: Tracer
-          tracer
-            | enableTrace = newTracer $ \message ->
-                putStrLn (show message)
-            | otherwise =
-                mempty
+      askOption $ \(ConcurrentRunStrategyOption concurrentRunStrategy) ->
+        let tracer :: Tracer
+            tracer
+              | enableTrace = newTracer $ \message ->
+                  putStrLn (show message)
+              | otherwise =
+                  mempty
 
-          runC action = do
-            config <- determineConfig
+            runC action = do
+              config <- determineConfig
 
-            let actualConfig :: Config
-                actualConfig =
-                  config
-                    { configDefaultWaitTimeout =
-                        defaultTimeout <|> configDefaultWaitTimeout config,
-                      configTracer = tracer
-                    }
+              let actualConfig :: Config
+                  actualConfig =
+                    config
+                      { configDefaultWaitTimeout =
+                          defaultTimeout <|> configDefaultWaitTimeout config,
+                        configTracer =
+                          tracer,
+                        configRunStrategy =
+                          if concurrentRunStrategy
+                            then ConcurrentRunStrategy Nothing
+                            else SequentialRunStrategy
+                      }
 
-            runTestContainer actualConfig action
+              runTestContainer actualConfig action
 
-          -- Correct resource handling is tricky here:
-          -- Tasty offers a bracket alike in IO. We  have
-          -- to transfer the ReleaseMap of the ResIO safely
-          -- to the release function. Fortunately resourcet
-          -- let's us access the internal state..
-          acquire :: IO (a, InternalState)
-          acquire = runC $ do
-            result <- startContainers
-            releaseMap <- liftResourceT getInternalState
+            -- Correct resource handling is tricky here:
+            -- Tasty offers a bracket alike in IO. We  have
+            -- to transfer the ReleaseMap of the ResIO safely
+            -- to the release function. Fortunately resourcet
+            -- let's us access the internal state..
+            acquire :: IO (a, InternalState)
+            acquire = runC $ do
+              result <- startContainers
+              releaseMap <- liftResourceT getInternalState
 
-            -- N.B. runResourceT runs the finalizers on every
-            -- resource. We don't want it to! We want to run
-            -- finalization in the release function that is
-            -- called by Tasty! stateAlloc increments a references
-            -- count to accomodate for exactly these kind of
-            -- cases.
-            liftIO $ stateAlloc releaseMap
-            pure (result, releaseMap)
+              -- N.B. runResourceT runs the finalizers on every
+              -- resource. We don't want it to! We want to run
+              -- finalization in the release function that is
+              -- called by Tasty! stateAlloc increments a references
+              -- count to accomodate for exactly these kind of
+              -- cases.
+              liftIO $ stateAlloc releaseMap
+              pure (result, releaseMap)
 
-          release :: (a, InternalState) -> IO ()
-          release (_, internalState) =
-            stateCleanup ReleaseNormal internalState
-       in withResource acquire release $ \mk ->
-            tests (fmap fst mk)
+            release :: (a, InternalState) -> IO ()
+            release (_, internalState) =
+              stateCleanup ReleaseNormal internalState
+         in withResource acquire release $ \mk ->
+              tests (fmap fst mk)
