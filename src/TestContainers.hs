@@ -41,6 +41,7 @@ module TestContainers
     -- * Logs
     M.LogConsumer,
     M.consoleLogConsumer,
+    M.prefixedLogConsumer,
 
     -- * @docker network@ parameters
     M.NetworkRequest,

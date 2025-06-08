@@ -20,6 +20,7 @@ module TestContainers.Docker.Internal
     Pipe (..),
     LogConsumer,
     consoleLogConsumer,
+    prefixedLogConsumer,
     dockerFollowLogs,
 
     -- * Common abstractions for Docker resources
@@ -38,6 +39,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Foldable (traverse_)
 import Data.Text (Text, pack, unpack)
+import Data.Text.Encoding (encodeUtf8)
 import System.Exit (ExitCode (..))
 import qualified System.IO
 import qualified System.Process as Process
@@ -89,7 +91,11 @@ data DockerException
         id :: ContainerId,
         -- | Textual representation of port mapping we were
         -- trying to look up.
-        port :: Text
+        port :: Text,
+        -- | The image tag of the container
+        imageName :: Maybe Text,
+        -- | The container name
+        containerName :: Maybe Text
       }
   deriving (Eq, Show)
 
@@ -157,6 +163,20 @@ consoleLogConsumer pipe line = do
       ByteString.hPut System.IO.stdout (ByteString.singleton 0x0a)
     Stderr -> do
       ByteString.hPutStr System.IO.stderr line
+      ByteString.hPut System.IO.stderr (ByteString.singleton 0x0a)
+
+-- | A 'LogConsumer' that prefixes with some prefix identifier.
+-- This makes it easier to identify which containers/callsites produced which logs.
+prefixedLogConsumer :: Text -> LogConsumer
+prefixedLogConsumer prefix pipe line = do
+  let prefixText = "[" <> prefix <> "] "
+      prefixedLine = encodeUtf8 prefixText <> line
+  case pipe of
+    Stdout -> do
+      ByteString.hPutStr System.IO.stdout prefixedLine
+      ByteString.hPut System.IO.stdout (ByteString.singleton 0x0a)
+    Stderr -> do
+      ByteString.hPutStr System.IO.stderr prefixedLine
       ByteString.hPut System.IO.stderr (ByteString.singleton 0x0a)
 
 -- | Forwards container logs to a 'LogConsumer'. This is equivalent of calling @docker logs containerId --follow@
