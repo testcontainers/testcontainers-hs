@@ -99,6 +99,7 @@ module TestContainers.Docker
     -- * Following logs
     LogConsumer,
     consoleLogConsumer,
+    prefixedLogConsumer,
     withFollowLogs,
 
     -- * Network related functionality
@@ -229,6 +230,7 @@ import TestContainers.Docker.Internal
     docker,
     dockerFollowLogs,
     dockerWithStdin,
+    prefixedLogConsumer,
   )
 import TestContainers.Docker.Network
   ( Network,
@@ -859,9 +861,13 @@ instance Exception TimeoutException
 -- | The exception thrown by `waitForState`.
 --
 -- @since 0.1.0.0
-newtype InvalidStateException = InvalidStateException
+data InvalidStateException = InvalidStateException
   { -- | The id of the underlying container that was not ready in time.
-    id :: ContainerId
+    id :: ContainerId,
+    -- | The image tag of the container
+    imageName :: Maybe ImageTag,
+    -- | The container name
+    containerName :: Maybe Text
   }
   deriving stock (Eq, Show)
 
@@ -872,7 +878,7 @@ instance Exception InvalidStateException
 --
 -- @since 0.5.0.0
 waitForState :: (State -> Bool) -> WaitUntilReady
-waitForState isReady = WaitReady $ \Container {id} -> do
+waitForState isReady = WaitReady $ \Container {id, image} -> do
   let wait = do
         Config {configTracer} <-
           ask
@@ -880,6 +886,13 @@ waitForState isReady = WaitReady $ \Container {id} -> do
           internalInspect configTracer id
 
         let state = containerState inspectOutput
+            containerName = inspectOutput ^? Optics.key "Name" % Optics._String
+            exception =
+              InvalidStateException
+                { id = id,
+                  imageName = Just (imageTag image),
+                  containerName = containerName
+                }
 
         if isReady state
           then pure ()
@@ -887,10 +900,10 @@ waitForState isReady = WaitReady $ \Container {id} -> do
             case stateStatus state of
               Exited ->
                 -- Once exited, state won't change!
-                throwM InvalidStateException {id}
+                throwM exception
               Dead ->
                 -- Once dead, state won't change!
-                throwM InvalidStateException {id}
+                throwM exception
               _ -> do
                 liftIO (threadDelay 500000)
                 wait
@@ -1201,7 +1214,7 @@ containerGateway Container {id, inspectOutput} =
 --
 -- @since 0.1.0.0
 containerPort :: Container -> Port -> Int
-containerPort Container {id, inspectOutput} Port {port, protocol} =
+containerPort Container {id, inspectOutput, image} Port {port, protocol} =
   let -- TODO also support UDP ports
       -- Using IsString so it works both with Text (aeson<2) and Aeson.Key (aeson>=2)
       textPort :: (IsString s) => s
@@ -1219,11 +1232,14 @@ containerPort Container {id, inspectOutput} Port {port, protocol} =
               % Optics._String
           ) of
         Nothing ->
-          throw $
-            UnknownPortMapping
-              { id,
-                port = textPort
-              }
+          let containerName = inspectOutput ^? Optics.key "Name" % Optics._String
+           in throw $
+                UnknownPortMapping
+                  { id,
+                    port = textPort,
+                    imageName = Just (imageTag image),
+                    containerName = containerName
+                  }
         Just hostPort ->
           read (unpack hostPort)
 
