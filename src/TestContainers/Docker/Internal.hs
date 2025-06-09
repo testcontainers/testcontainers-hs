@@ -83,8 +83,16 @@ data DockerException
       }
   | InspectUnknownContainerId {id :: ContainerId}
   | InspectOutputInvalidJSON {id :: ContainerId}
-  | InspectOutputMissingNetwork {id :: ContainerId}
-  | InspectOutputUnexpected {id :: ContainerId}
+  | InspectOutputMissingNetwork
+      { id :: ContainerId,
+        imageName :: Maybe Text,
+        containerName :: Maybe Text
+      }
+  | InspectOutputUnexpected
+      { id :: ContainerId,
+        imageName :: Maybe Text,
+        containerName :: Maybe Text
+      }
   | UnknownPortMapping
       { -- | Id of the `Container` that we tried to lookup the
         -- port mapping.

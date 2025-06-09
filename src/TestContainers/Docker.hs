@@ -850,9 +850,13 @@ instance Exception UnexpectedEndOfPipe
 -- | The exception thrown by `waitUntilTimeout`.
 --
 -- @since 0.1.0.0
-newtype TimeoutException = TimeoutException
+data TimeoutException = TimeoutException
   { -- | The id of the underlying container that was not ready in time.
-    id :: ContainerId
+    id :: ContainerId,
+    -- | The image tag of the container
+    imageName :: Maybe ImageTag,
+    -- | The container name
+    containerName :: Maybe Text
   }
   deriving (Eq, Show)
 
@@ -1084,8 +1088,15 @@ waitUntilReady container@Container {id} input = do
               timeout (seconds * 1000000) $
                 runInIO (interpreter rest)
             case result of
-              Nothing ->
-                throwM $ TimeoutException {id}
+              Nothing -> do
+                let Container {image, inspectOutput} = container
+                    containerName = inspectOutput ^? Optics.key "Name" % Optics._String
+                throwM $
+                  TimeoutException
+                    { id,
+                      imageName = Just (imageTag image),
+                      containerName = containerName
+                    }
               Just {} ->
                 pure ()
         WaitMany first second -> do
@@ -1155,13 +1166,19 @@ containerIp =
 
 -- | Get the IP address of a running Docker container using @docker inspect@.
 internalContainerIp :: Container -> Text
-internalContainerIp Container {id, inspectOutput} =
+internalContainerIp Container {id, inspectOutput, image} =
   case inspectOutput
     ^? Optics.key "NetworkSettings"
       % Optics.key "IPAddress"
       % Optics._String of
-    Nothing ->
-      throw $ InspectOutputUnexpected {id}
+    Nothing -> do
+      let containerName = inspectOutput ^? Optics.key "Name" % Optics._String
+      throw $
+        InspectOutputUnexpected
+          { id,
+            imageName = Just (imageTag image),
+            containerName = containerName
+          }
     Just address ->
       address
 
@@ -1170,7 +1187,7 @@ internalContainerIp Container {id, inspectOutput} =
 --
 -- @since 0.5.0.0
 containerAlias :: Container -> Text
-containerAlias Container {id, inspectOutput} =
+containerAlias Container {id, inspectOutput, image} =
   case inspectOutput
     ^? pre
       ( Optics.key "NetworkSettings"
@@ -1180,10 +1197,13 @@ containerAlias Container {id, inspectOutput} =
           % Optics.values
           % Optics._String
       ) of
-    Nothing ->
+    Nothing -> do
+      let containerName = inspectOutput ^? Optics.key "Name" % Optics._String
       throw $
         InspectOutputMissingNetwork
-          { id
+          { id,
+            imageName = Just (imageTag image),
+            containerName = containerName
           }
     Just alias ->
       alias
@@ -1193,7 +1213,7 @@ containerAlias Container {id, inspectOutput} =
 --
 -- @since 0.5.0.0
 containerGateway :: Container -> Text
-containerGateway Container {id, inspectOutput} =
+containerGateway Container {id, inspectOutput, image} =
   case inspectOutput
     ^? pre
       ( Optics.key "NetworkSettings"
@@ -1202,10 +1222,13 @@ containerGateway Container {id, inspectOutput} =
           % Optics.key "Gateway"
           % Optics._String
       ) of
-    Nothing ->
+    Nothing -> do
+      let containerName = inspectOutput ^? Optics.key "Name" % Optics._String
       throw $
         InspectOutputMissingNetwork
-          { id
+          { id,
+            imageName = Just (imageTag image),
+            containerName = containerName
           }
     Just gatewayIp ->
       gatewayIp
