@@ -89,6 +89,7 @@ module TestContainers.Docker
     setRm,
     setEnv,
     withWorkingDirectory,
+    withCopyFileToContainer,
     withNetwork,
     withNetworkAlias,
     setLink,
@@ -160,7 +161,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (IOException, throw)
-import Control.Monad (forM_, replicateM, unless)
+import Control.Monad (forM_, replicateM, unless, void)
 import Control.Monad.Catch
   ( Exception,
     MonadCatch,
@@ -290,7 +291,8 @@ data ContainerRequest = ContainerRequest
     labels :: [(Text, Text)],
     noReaper :: Bool,
     followLogs :: Maybe LogConsumer,
-    workDirectory :: Maybe Text
+    workDirectory :: Maybe Text,
+    copyFilesToContainer :: [(FilePath, FilePath)]
   }
 
 instance WithoutReaper ContainerRequest where
@@ -326,7 +328,8 @@ containerRequest image =
       labels = mempty,
       noReaper = False,
       followLogs = Nothing,
-      workDirectory = Nothing
+      workDirectory = Nothing,
+      copyFilesToContainer = mempty
     }
 
 -- | Set the name of a Docker container. This is equivalent to invoking @docker run@
@@ -416,6 +419,27 @@ setEnv newEnv req =
 withWorkingDirectory :: Text -> ContainerRequest -> ContainerRequest
 withWorkingDirectory workdir request =
   request {workDirectory = Just workdir}
+
+-- | Copies a file from the host to the container. Call this function
+-- multiple times to copy multiple files to the container.
+--
+-- This can be used, for example, to initialize a database:
+--
+-- >>> :{
+--     containerRequest (fromTag "postgres:16-alpine")
+--         & withCopyFileToContainer "my-init-script.sql" "/docker-entrypoint-initdb.d/"
+-- :}
+--
+-- @since 0.5.2.0
+withCopyFileToContainer ::
+  -- | File on the host
+  FilePath ->
+  -- | Directory in the container
+  FilePath ->
+  ContainerRequest ->
+  ContainerRequest
+withCopyFileToContainer fileFromHost containerDirectory request =
+  request {copyFilesToContainer = copyFilesToContainer request <> [(fileFromHost, containerDirectory)]}
 
 -- | Set the network the container will connect to. This is equivalent to passing
 -- @--network network_name@ to @docker run@.
@@ -558,7 +582,8 @@ run request = do
           labels,
           noReaper,
           followLogs,
-          workDirectory
+          workDirectory,
+          copyFilesToContainer
         } = request
 
   config@Config {configTracer, configCreateReaper} <-
@@ -580,35 +605,43 @@ run request = do
         Just . (prefix <>) . ("-" <>) . pack
           <$> replicateM 6 (Random.randomRIO ('a', 'z'))
 
-  let dockerRun :: [Text]
-      dockerRun =
+  -- Instead of using `docker run`, we use the more manual `docker create` + `docker start`.
+  -- This allows to get the container ID early from `docker create`, and thus
+  -- optionally copy files using `docker cp`.
+  let dockerCreate :: [Text]
+      dockerCreate =
         concat $
-          [["run"]]
-            ++ [["--detach"]]
-            ++ [["--name", containerName] | Just containerName <- [name]]
-            ++ [["--label", label <> "=" <> value] | (label, value) <- additionalLabels ++ labels]
+          [["create"]]
+            ++ [["--cpus", value] | Just value <- [cpus]]
             ++ [["--env", variable <> "=" <> value] | (variable, value) <- env]
-            ++ [["--publish", pack (show port) <> "/" <> protocol] | Port {port, protocol} <- exposedPorts]
+            ++ [["--label", label <> "=" <> value] | (label, value) <- additionalLabels ++ labels]
+            ++ [["--link", container] | container <- links]
+            ++ [["--memory", value] | Just value <- [memory]]
+            ++ [["--name", containerName] | Just containerName <- [name]]
             ++ [["--network", networkName] | Just (Right networkName) <- [network]]
             ++ [["--network", networkId dockerNetwork] | Just (Left dockerNetwork) <- [network]]
             ++ [["--network-alias", alias] | Just alias <- [networkAlias]]
-            ++ [["--link", container] | container <- links]
-            ++ [["--volume", src <> ":" <> dest] | (src, dest) <- volumeMounts]
+            ++ [["--publish", pack (show port) <> "/" <> protocol] | Port {port, protocol} <- exposedPorts]
             ++ [["--rm"] | rmOnExit]
+            ++ [["--volume", src <> ":" <> dest] | (src, dest) <- volumeMounts]
             ++ [["--workdir", workdir] | Just workdir <- [workDirectory]]
-            ++ [["--memory", value] | Just value <- [memory]]
-            ++ [["--cpus", value] | Just value <- [cpus]]
             ++ [[tag]]
+
+  (id :: ContainerId) <- strip . pack <$> docker configTracer dockerCreate
+
+  forM_ copyFilesToContainer $ \(hostFile, containerFile) ->
+    docker configTracer ["cp", pack hostFile, id <> ":" <> pack containerFile]
+
+  let dockerStart :: [Text]
+      dockerStart =
+        concat $
+          [["start"]]
+            ++ [[id]]
             ++ [command | Just command <- [cmd]]
 
-  stdout <- docker configTracer dockerRun
+  void $ docker configTracer dockerStart
 
-  let id :: ContainerId
-      !id =
-        -- N.B. Force to not leak STDOUT String
-        strip (pack stdout)
-
-      -- Careful, this is really meant to be lazy
+  let -- Careful, this is really meant to be lazy
       ~inspectOutput =
         unsafePerformIO $
           internalInspect configTracer id

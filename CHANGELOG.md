@@ -1,5 +1,9 @@
 # Revision history for testcontainer-hs
 
+## 0.5.2.0 -- Unreleased
+
+* Introduce `withCopyFileToContainer` to copy local files to the container (@LaurentRDC, https://github.com/testcontainers/testcontainers-hs/pull/62)
+
 ## 0.5.1.0 -- 2025-01-14
 
 * Introduce `withWorkingDirectory` to set the working directory inside a container (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/37)
