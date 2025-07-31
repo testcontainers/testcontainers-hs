@@ -27,6 +27,7 @@ import TestContainers.Tasty
     waitUntilMappedPortReachable,
     waitUntilTimeout,
     withContainers,
+    withCopyFileToContainer,
     withFollowLogs,
     withNetwork,
     (&),
@@ -77,6 +78,11 @@ containers1 = do
         & withNetwork net
         & setWaitingFor
           (waitForHttp "16686/tcp" "/" [200])
+
+  _postgres <-
+    run $
+      containerRequest (fromTag "postgres:16-alpine")
+        & withCopyFileToContainer "test/data/init-script.sql" "/docker-entrypoint-initdb.d/"
 
   _helloWorld <-
     run $

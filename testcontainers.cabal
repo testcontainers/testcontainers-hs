@@ -18,6 +18,7 @@ build-type:         Simple
 extra-source-files:
   CHANGELOG.md
   README.md
+  test/data/init-script.sql
 
 tested-with:
   GHC ==8.8.4 || ==8.10.7 || ==9.0.2 || ==9.2.4 || ==9.4.2 || ==9.8.2

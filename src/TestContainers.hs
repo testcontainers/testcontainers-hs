@@ -31,6 +31,7 @@ module TestContainers
     M.setMemory,
     M.setCpus,
     M.withWorkingDirectory,
+    M.withCopyFileToContainer,
     M.withNetwork,
     M.withNetworkAlias,
     M.setLink,
