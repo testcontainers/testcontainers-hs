@@ -55,7 +55,7 @@ library
     , http-client    >=0.5.14  && <1
     , http-types     >=0.12.3  && <1
     , mtl            >=2.2.2   && <3
-    , network        >=2.8.0   && <3.2
+    , network        >=2.8.0   && <3.3
     , optics-core    >=0.1     && <0.5
     , process        >=1.6.5   && <1.7
     , random         >=1.2     && <2
