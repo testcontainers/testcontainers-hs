@@ -1,6 +1,6 @@
 # Revision history for testcontainer-hs
 
-## 0.5.2.0 -- Unreleased
+## 0.5.2.0 -- 2025-08-28
 
 * Introduce `withCopyFileToContainer` to copy local files to the container (@LaurentRDC, https://github.com/testcontainers/testcontainers-hs/pull/62)
 
