@@ -94,6 +94,7 @@ module TestContainers.Docker
     withNetworkAlias,
     setLink,
     setExpose,
+    setPortBindings,
     setWaitingFor,
     run,
 
@@ -279,6 +280,7 @@ data ContainerRequest = ContainerRequest
     cmd :: Maybe [Text],
     env :: [(Text, Text)],
     exposedPorts :: [Port],
+    portBindings :: [(Int, Port)],
     volumeMounts :: [(Text, Text)],
     network :: Maybe (Either Network Text),
     networkAlias :: Maybe Text,
@@ -317,6 +319,7 @@ containerRequest image =
       cmd = Nothing,
       env = [],
       exposedPorts = [],
+      portBindings = [],
       volumeMounts = [],
       network = Nothing,
       networkAlias = Nothing,
@@ -549,6 +552,24 @@ setExpose :: [Port] -> ContainerRequest -> ContainerRequest
 setExpose newExpose req =
   req {exposedPorts = newExpose}
 
+-- | Set fixed port bindings on the container. This is equivalent to setting
+-- @--publish HOST_PORT:CONTAINER_PORT@ for each binding. If a host port is
+-- already in use, Docker will fail to start the container.
+--
+-- Example:
+--
+-- @
+--   container <- `run` $ `containerRequest` postgres
+--     & `setPortBindings` [(5432, 5432), (5433, 5433)]
+-- @
+--
+-- This will fail if port 5432 or 5433 is already bound on the host.
+--
+-- @since 0.5.1.0
+setPortBindings :: [(Int, Port)] -> ContainerRequest -> ContainerRequest
+setPortBindings bindings req =
+  req {portBindings = bindings}
+
 -- | Set the waiting strategy on the container. Depending on a Docker container
 -- it can take some time until the provided service is ready. You will want to
 -- use to `setWaitingFor` to block until the container is ready to use.
@@ -571,6 +592,7 @@ run request = do
           cmd,
           env,
           exposedPorts,
+          portBindings,
           volumeMounts,
           network,
           networkAlias,
@@ -622,6 +644,7 @@ run request = do
             ++ [["--network", networkId dockerNetwork] | Just (Left dockerNetwork) <- [network]]
             ++ [["--network-alias", alias] | Just alias <- [networkAlias]]
             ++ [["--publish", pack (show port) <> "/" <> protocol] | Port {port, protocol} <- exposedPorts]
+            ++ [["--publish", pack (show hostPort) <> ":" <> pack (show containerPort) <> "/" <> protocol] | (hostPort, Port {port = containerPort, protocol}) <- portBindings]
             ++ [["--rm"] | rmOnExit]
             ++ [["--volume", src <> ":" <> dest] | (src, dest) <- volumeMounts]
             ++ [["--workdir", workdir] | Just workdir <- [workDirectory]]
@@ -658,8 +681,9 @@ run request = do
           { id,
             releaseKey,
             image,
-            inspectOutput,
-            config
+            config,
+            containerPortBindings = portBindings,
+            inspectOutput
           }
 
   -- Last but not least, execute the WaitUntilReady checks
@@ -1165,6 +1189,8 @@ data Container = Container
     image :: Image,
     -- | Configuration used to create and run this container.
     config :: Config,
+    -- | Fixed port bindings specified in the ContainerRequest.
+    containerPortBindings :: [(Int, Port)],
     -- | Memoized output of `docker inspect`. This is being calculated lazily.
     inspectOutput :: InspectOutput
   }
@@ -1270,34 +1296,37 @@ containerGateway Container {id, inspectOutput, image} =
 --
 -- @since 0.1.0.0
 containerPort :: Container -> Port -> Int
-containerPort Container {id, inspectOutput, image} Port {port, protocol} =
-  let -- TODO also support UDP ports
-      -- Using IsString so it works both with Text (aeson<2) and Aeson.Key (aeson>=2)
-      textPort :: (IsString s) => s
-      textPort = fromString $ show port <> "/" <> unpack protocol
-   in -- TODO be more mindful, make sure to grab the
-      -- port from the right host address
-
-      case inspectOutput
-        ^? pre
-          ( Optics.key "NetworkSettings"
-              % Optics.key "Ports"
-              % Optics.key textPort
-              % Optics.values
-              % Optics.key "HostPort"
-              % Optics._String
-          ) of
-        Nothing ->
-          let containerName = inspectOutput ^? Optics.key "Name" % Optics._String
-           in throw $
-                UnknownPortMapping
-                  { id,
-                    port = textPort,
-                    imageName = Just (imageTag image),
-                    containerName = containerName
-                  }
-        Just hostPort ->
-          read (unpack hostPort)
+containerPort Container {id, inspectOutput, image, containerPortBindings} requestedPort@(Port {port, protocol}) =
+  -- First check if there's a fixed binding for this port
+  case find (\(_, boundPort) -> boundPort == requestedPort) containerPortBindings of
+    Just (hostPort, _) -> hostPort
+    Nothing ->
+      let -- TODO also support UDP ports
+          -- Using IsString so it works both with Text (aeson<2) and Aeson.Key (aeson>=2)
+          textPort :: (IsString s) => s
+          textPort = fromString $ show port <> "/" <> unpack protocol
+       in -- TODO be more mindful, make sure to grab the
+          -- port from the right host address
+          case inspectOutput
+            ^? pre
+              ( Optics.key "NetworkSettings"
+                  % Optics.key "Ports"
+                  % Optics.key textPort
+                  % Optics.values
+                  % Optics.key "HostPort"
+                  % Optics._String
+              ) of
+            Nothing ->
+              let containerName = inspectOutput ^? Optics.key "Name" % Optics._String
+               in throw $
+                    UnknownPortMapping
+                      { id,
+                        port = textPort,
+                        imageName = Just (imageTag image),
+                        containerName = containerName
+                      }
+            Just hostPort ->
+              read (unpack hostPort)
 
 -- | Returns the domain and port exposing the given container's port. Differs
 -- from 'containerPort' in that 'containerAddress' will return the container's
