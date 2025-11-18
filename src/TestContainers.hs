@@ -36,6 +36,7 @@ module TestContainers
     M.withNetworkAlias,
     M.setLink,
     M.setExpose,
+    M.setPortBindings,
     M.setWaitingFor,
     M.withFollowLogs,
 

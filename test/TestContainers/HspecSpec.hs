@@ -11,7 +11,9 @@ import TestContainers.Hspec
     containerRequest,
     redis,
     run,
+    setPortBindings,
     withContainers,
+    (&),
   )
 
 data ContainerPorts = ContainerPorts
@@ -26,12 +28,28 @@ containers1 = do
       { redisPort = containerPort redisContainer "6379/tcp"
       }
 
+containers2 :: TestContainer ContainerPorts
+containers2 = do
+  redisContainer <-
+    run $
+      containerRequest redis
+        & setPortBindings [(16379, "6379/tcp")]
+  pure
+    ContainerPorts
+      { redisPort = containerPort redisContainer "6379/tcp"
+      }
+
 main :: IO ()
 main = hspec spec_all
 
 spec_all :: Spec
-spec_all =
+spec_all = do
   around (withContainers containers1) $
-    describe "TestContainers tests" $
+    describe "TestContainers tests with random ports" $
       it "test1" $ \ContainerPorts {} ->
         shouldBe () ()
+
+  around (withContainers containers2) $
+    describe "TestContainers tests with fixed port bindings" $ do
+      it "should use the fixed host port" $ \ContainerPorts {..} ->
+        redisPort `shouldBe` 16379
