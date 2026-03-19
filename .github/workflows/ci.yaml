@@ -12,7 +12,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest] # [macOS-latest, windows-latest] do not come with docker :(
+        os: 
+          - ubuntu-latest
+          - macos-26-intel
+          - windows-latest
         cabal: ["3.12.1.0"]
         ghc:
           - 9.2.8
@@ -45,6 +48,10 @@ jobs:
       run: |
         cabal configure -O0 --enable-tests --enable-benchmarks --test-show-details=direct
         cabal build all
+
+    - name: Set up Docker
+      if: runner.os == 'macOS'
+      uses: docker/setup-docker-action@v5
 
     - name: Test
       run: |
