@@ -42,11 +42,10 @@ library
     TestContainers.Tasty
     TestContainers.Trace
 
-  -- other-modules:
+  other-modules: TestContainers.Docker.JSON
   -- other-extensions:
   build-depends:
       aeson          >=1.4.6   && <3
-    , aeson-optics   >=1.1     && <2
     , async
     , base           >=4.12    && <5
     , bytestring     >=0.10.8  && <0.13
@@ -56,13 +55,14 @@ library
     , http-types     >=0.12.3  && <1
     , mtl            >=2.2.2   && <3
     , network        >=2.8.0   && <3.3
-    , optics-core    >=0.1     && <0.5
     , process        >=1.6.5   && <1.7
     , random         >=1.2     && <2
     , resourcet      >=1.2.4   && <1.4
+    , scientific     >=0.3     && <0.4
     , tasty          >=1.0     && <1.6
     , text           >=1.2.3   && <3
     , unliftio-core  >=0.1.0   && <0.3
+    , vector         >=0.12    && <0.14
 
   hs-source-dirs:   src
   default-language: Haskell2010

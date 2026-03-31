@@ -19,11 +19,9 @@ where
 
 import Control.Exception (Exception, throw)
 import Data.Aeson (Value)
-import qualified Data.Aeson.Optics as Optics
 import Data.Text (Text)
-import Optics.Operators ((^?))
-import Optics.Optic ((%))
 import TestContainers.Docker.Internal (InspectOutput)
+import TestContainers.Docker.JSON (asBool, asInteger, asText, lookupKey)
 
 -- | An exception thrown in case the State object is invalid and couldn't be parsed.
 --
@@ -57,7 +55,7 @@ newtype State = State Value
 -- @since 0.5.0.0
 containerState :: InspectOutput -> State
 containerState inspectOutput =
-  case inspectOutput ^? Optics.key "State" of
+  case lookupKey "State" inspectOutput of
     Just state -> State state
     Nothing -> State "dummy"
 
@@ -66,9 +64,7 @@ containerState inspectOutput =
 -- @since 0.5.0.0
 stateStatus :: State -> Status
 stateStatus (State value) =
-  case value
-    ^? Optics.key "Status"
-      % Optics._String of
+  case lookupKey "Status" value >>= asText of
     Just "created" -> Created
     Just "running" -> Running
     Just "paused" -> Paused
@@ -84,9 +80,7 @@ stateStatus (State value) =
 -- @since 0.5.0.0
 stateOOMKilled :: State -> Bool
 stateOOMKilled (State value) =
-  case value
-    ^? Optics.key "OOMKilled"
-      % Optics._Bool of
+  case lookupKey "OOMKilled" value >>= asBool of
     Just True -> True
     _ -> False
 
@@ -95,9 +89,7 @@ stateOOMKilled (State value) =
 -- @since 0.5.0.0
 statePid :: State -> Maybe Int
 statePid (State value) =
-  case value
-    ^? Optics.key "Pid"
-      % Optics._Integer of
+  case lookupKey "Pid" value >>= asInteger of
     Just pid -> Just (fromIntegral pid)
     _ -> Nothing
 
@@ -106,9 +98,7 @@ statePid (State value) =
 -- @since 0.5.0.0
 stateExitCode :: State -> Maybe Int
 stateExitCode (State value) =
-  case value
-    ^? Optics.key "ExitCode"
-      % Optics._Integer of
+  case lookupKey "ExitCode" value >>= asInteger of
     Just exitCode -> Just (fromIntegral exitCode)
     _ -> Nothing
 
@@ -117,9 +107,7 @@ stateExitCode (State value) =
 -- @since 0.5.0.0
 stateError :: State -> Maybe Text
 stateError (State value) =
-  case value
-    ^? Optics.key "Error"
-      % Optics._String of
+  case lookupKey "Error" value >>= asText of
     Just err -> Just err
     _ -> Nothing
 
@@ -128,9 +116,7 @@ stateError (State value) =
 -- @since 0.5.0.0
 stateStartedAt :: State -> Maybe Text
 stateStartedAt (State value) =
-  case value
-    ^? Optics.key "StartedAt"
-      % Optics._String of
+  case lookupKey "StartedAt" value >>= asText of
     Just err -> Just err
     _ -> Nothing
 
@@ -139,8 +125,6 @@ stateStartedAt (State value) =
 -- @since 0.5.0.0
 stateFinishedAt :: State -> Maybe Text
 stateFinishedAt (State value) =
-  case value
-    ^? Optics.key "FinishedAt"
-      % Optics._String of
+  case lookupKey "FinishedAt" value >>= asText of
     Just err -> Just err
     _ -> Nothing

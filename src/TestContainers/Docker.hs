@@ -180,11 +180,11 @@ import Control.Monad.Trans.Resource
     runResourceT,
   )
 import Data.Aeson (decode')
-import qualified Data.Aeson.Optics as Optics
 import qualified Data.ByteString.Lazy.Char8 as LazyByteString
 import Data.Function ((&))
+import Data.Functor ((<&>))
 import Data.List (find, stripPrefix)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.String (IsString (..))
 import Data.Text (Text, pack, splitOn, strip, unpack)
 import Data.Text.Encoding (encodeUtf8)
@@ -205,9 +205,6 @@ import Network.HTTP.Client
   )
 import Network.HTTP.Types (statusCode)
 import qualified Network.Socket as Socket
-import Optics.Fold (pre)
-import Optics.Operators ((^?))
-import Optics.Optic ((%), (<&>))
 import System.Directory (doesFileExist)
 import System.Environment (lookupEnv)
 import System.IO (Handle, hClose)
@@ -233,6 +230,7 @@ import TestContainers.Docker.Internal
     dockerWithStdin,
     prefixedLogConsumer,
   )
+import TestContainers.Docker.JSON (asText, eachMember, eachValue, lookupKey)
 import TestContainers.Docker.Network
   ( Network,
     NetworkId,
@@ -923,7 +921,7 @@ waitForState isReady = WaitReady $ \Container {id, image} -> do
           internalInspect configTracer id
 
         let state = containerState inspectOutput
-            containerName = inspectOutput ^? Optics.key "Name" % Optics._String
+            containerName = lookupKey "Name" inspectOutput >>= asText
             exception =
               InvalidStateException
                 { id = id,
@@ -1123,7 +1121,7 @@ waitUntilReady container@Container {id} input = do
             case result of
               Nothing -> do
                 let Container {image, inspectOutput} = container
-                    containerName = inspectOutput ^? Optics.key "Name" % Optics._String
+                    containerName = lookupKey "Name" inspectOutput >>= asText
                 throwM $
                   TimeoutException
                     { id,
@@ -1200,12 +1198,9 @@ containerIp =
 -- | Get the IP address of a running Docker container using @docker inspect@.
 internalContainerIp :: Container -> Text
 internalContainerIp Container {id, inspectOutput, image} =
-  case inspectOutput
-    ^? Optics.key "NetworkSettings"
-      % Optics.key "IPAddress"
-      % Optics._String of
+  case lookupKey "NetworkSettings" inspectOutput >>= lookupKey "IPAddress" >>= asText of
     Nothing -> do
-      let containerName = inspectOutput ^? Optics.key "Name" % Optics._String
+      let containerName = lookupKey "Name" inspectOutput >>= asText
       throw $
         InspectOutputUnexpected
           { id,
@@ -1221,25 +1216,21 @@ internalContainerIp Container {id, inspectOutput, image} =
 -- @since 0.5.0.0
 containerAlias :: Container -> Text
 containerAlias Container {id, inspectOutput, image} =
-  case inspectOutput
-    ^? pre
-      ( Optics.key "NetworkSettings"
-          % Optics.key "Networks"
-          % Optics.members
-          % Optics.key "Aliases"
-          % Optics.values
-          % Optics._String
-      ) of
-    Nothing -> do
-      let containerName = inspectOutput ^? Optics.key "Name" % Optics._String
-      throw $
-        InspectOutputMissingNetwork
-          { id,
-            imageName = Just (imageTag image),
-            containerName = containerName
-          }
-    Just alias ->
-      alias
+  let aliases = do
+        network <- maybe [] eachMember (lookupKey "NetworkSettings" inspectOutput >>= lookupKey "Networks")
+        aliasValue <- maybe [] eachValue (lookupKey "Aliases" network)
+        maybe [] pure (asText aliasValue)
+   in case listToMaybe aliases of
+        Nothing -> do
+          let containerName = lookupKey "Name" inspectOutput >>= asText
+          throw $
+            InspectOutputMissingNetwork
+              { id,
+                imageName = Just (imageTag image),
+                containerName = containerName
+              }
+        Just alias ->
+          alias
 
 -- | Get the IP address for the container's gateway, i.e. the host.
 -- Takes the first gateway address found.
@@ -1247,24 +1238,20 @@ containerAlias Container {id, inspectOutput, image} =
 -- @since 0.5.0.0
 containerGateway :: Container -> Text
 containerGateway Container {id, inspectOutput, image} =
-  case inspectOutput
-    ^? pre
-      ( Optics.key "NetworkSettings"
-          % Optics.key "Networks"
-          % Optics.members
-          % Optics.key "Gateway"
-          % Optics._String
-      ) of
-    Nothing -> do
-      let containerName = inspectOutput ^? Optics.key "Name" % Optics._String
-      throw $
-        InspectOutputMissingNetwork
-          { id,
-            imageName = Just (imageTag image),
-            containerName = containerName
-          }
-    Just gatewayIp ->
-      gatewayIp
+  let gateways = do
+        network <- maybe [] eachMember (lookupKey "NetworkSettings" inspectOutput >>= lookupKey "Networks")
+        maybe [] pure (lookupKey "Gateway" network >>= asText)
+   in case listToMaybe gateways of
+        Nothing -> do
+          let containerName = lookupKey "Name" inspectOutput >>= asText
+          throw $
+            InspectOutputMissingNetwork
+              { id,
+                imageName = Just (imageTag image),
+                containerName = containerName
+              }
+        Just gatewayIp ->
+          gatewayIp
 
 -- | Looks up an exposed port on the host.
 --
@@ -1278,26 +1265,28 @@ containerPort Container {id, inspectOutput, image} Port {port, protocol} =
    in -- TODO be more mindful, make sure to grab the
       -- port from the right host address
 
-      case inspectOutput
-        ^? pre
-          ( Optics.key "NetworkSettings"
-              % Optics.key "Ports"
-              % Optics.key textPort
-              % Optics.values
-              % Optics.key "HostPort"
-              % Optics._String
-          ) of
-        Nothing ->
-          let containerName = inspectOutput ^? Optics.key "Name" % Optics._String
-           in throw $
-                UnknownPortMapping
-                  { id,
-                    port = textPort,
-                    imageName = Just (imageTag image),
-                    containerName = containerName
-                  }
-        Just hostPort ->
-          read (unpack hostPort)
+      let hostPorts = do
+            entry <-
+              maybe
+                []
+                eachValue
+                ( lookupKey "NetworkSettings" inspectOutput
+                    >>= lookupKey "Ports"
+                    >>= lookupKey (show port <> "/" <> unpack protocol)
+                )
+            maybe [] pure (lookupKey "HostPort" entry >>= asText)
+       in case listToMaybe hostPorts of
+            Nothing ->
+              let containerName = lookupKey "Name" inspectOutput >>= asText
+               in throw $
+                    UnknownPortMapping
+                      { id,
+                        port = textPort,
+                        imageName = Just (imageTag image),
+                        containerName = containerName
+                      }
+            Just hostPort ->
+              read (unpack hostPort)
 
 -- | Returns the domain and port exposing the given container's port. Differs
 -- from 'containerPort' in that 'containerAddress' will return the container's
