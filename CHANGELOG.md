@@ -1,5 +1,9 @@
 # Revision history for testcontainer-hs
 
+## 0.5.3.0 -- 2026-03-31
+
+* Removed dependency on `optics-core` and `aeson-optics` (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/70)
+
 ## 0.5.2.0 -- 2025-08-28
 
 * Introduce `withCopyFileToContainer` to copy local files to the container (@LaurentRDC, https://github.com/testcontainers/testcontainers-hs/pull/62)
