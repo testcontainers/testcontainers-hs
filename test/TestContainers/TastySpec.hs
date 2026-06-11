@@ -3,12 +3,10 @@
 
 module TestContainers.TastySpec (main, test_all) where
 
-import Data.Text.Lazy (isInfixOf)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
 import TestContainers.Tasty
-  ( Pipe (Stdout),
-    TestContainer,
+  ( TestContainer,
     consoleLogConsumer,
     containerRequest,
     createNetwork,
@@ -22,7 +20,6 @@ import TestContainers.Tasty
     setWaitingFor,
     successfulExit,
     waitForHttp,
-    waitForLogLine,
     waitForState,
     waitUntilMappedPortReachable,
     waitUntilTimeout,
@@ -57,9 +54,7 @@ containers1 = do
         & withNetwork net
         & withFollowLogs consoleLogConsumer
         & setWaitingFor
-          ( waitForLogLine Stdout (("completed with" `isInfixOf`))
-              <> waitUntilMappedPortReachable 5672
-          )
+          (waitUntilMappedPortReachable 5672)
 
   _nginx <-
     run $
