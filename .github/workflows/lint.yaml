@@ -10,12 +10,12 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v6
       if: github.event.action == 'opened' || github.event.action == 'synchronize' || github.event.ref == 'refs/heads/master'
 
     - name: Check code is formatted using Ormolu
       run: |
-        curl -L https://github.com/tweag/ormolu/releases/download/0.7.2.0/ormolu-Linux.zip -o ormolu.zip
+        curl -L https://github.com/tweag/ormolu/releases/download/0.8.1.0/ormolu-x86_64-linux.zip -o ormolu.zip
         unzip ormolu.zip
 
         git ls-files | grep \.hs | xargs ./ormolu --mode=inplace
