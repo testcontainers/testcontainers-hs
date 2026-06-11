@@ -56,6 +56,10 @@ jobs:
       uses: docker/setup-docker-action@v5
 
     - name: Test
+      # GitHub-hosted Windows runners have no Linux Docker daemon, so the
+      # Docker-dependent test suite cannot run there. The Build step above still
+      # verifies the library compiles on Windows.
+      if: runner.os != 'Windows'
       run: |
         cabal test all
 

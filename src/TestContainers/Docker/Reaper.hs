@@ -58,7 +58,7 @@ newtype Ryuk = Ryuk {ryukSocket :: Socket.Socket}
 -- @since 0.5.0.0
 ryukImageTag :: Text
 ryukImageTag =
-  "docker.io/testcontainers/ryuk:0.3.4"
+  "docker.io/testcontainers/ryuk:0.14.0"
 
 -- | Exposed port for the ryuk reaper.
 --

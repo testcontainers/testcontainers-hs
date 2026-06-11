@@ -670,11 +670,24 @@ run request = do
 -- @since 0.5.0.0
 createRyukReaper :: TestContainer Reaper
 createRyukReaper = do
-  dockerSocketLocation <-
-    liftIO $
-      lookupEnv "DOCKER_HOST"
-        <&> (>>= stripPrefix "unix://")
-        <&> fromMaybe "/var/run/docker.sock"
+  -- Ryuk needs access to the Docker daemon socket to reap resources. The way
+  -- that socket is exposed depends on whether the daemon runs Linux or Windows
+  -- containers. Docker automatically selects the matching ryuk image variant
+  -- from the multi-arch manifest based on the daemon's OS.
+  dockerSocketMount <- do
+    onLinux <- isDockerOnLinux
+    if onLinux
+      then do
+        dockerSocketLocation <-
+          liftIO $
+            lookupEnv "DOCKER_HOST"
+              <&> (>>= stripPrefix "unix://")
+              <&> fromMaybe "/var/run/docker.sock"
+        pure (pack dockerSocketLocation, "/var/run/docker.sock")
+      else
+        -- Windows containers talk to the daemon through the named pipe rather
+        -- than a unix socket. This is what the windows/amd64 ryuk build expects.
+        pure ("\\\\.\\pipe\\docker_engine", "\\\\.\\pipe\\docker_engine")
   ryukContainer <-
     run $
       containerRequest (fromTag ryukImageTag)
@@ -682,7 +695,7 @@ createRyukReaper = do
         -- Ryuk destroys itself once it reaped the resources,
         -- no need to register itself with itself.
         withoutReaper
-        & setVolumeMounts [(pack dockerSocketLocation, "/var/run/docker.sock")]
+        & setVolumeMounts [dockerSocketMount]
         & setExpose [ryukPort]
         & setWaitingFor (waitUntilMappedPortReachable ryukPort)
         & setRm True
