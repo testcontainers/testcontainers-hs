@@ -51,7 +51,7 @@ containers1 = do
 
   _rabbitmq <-
     run $
-      containerRequest (fromTag "rabbitmq:3.8.4")
+      containerRequest (fromTag "rabbitmq:3.13")
         & setRm False
         & setExpose [5672]
         & withNetwork net
@@ -63,7 +63,7 @@ containers1 = do
 
   _nginx <-
     run $
-      containerRequest (fromTag "nginx:1.23.1-alpine")
+      containerRequest (fromTag "nginx:1.27-alpine")
         & setExpose [80]
         & withNetwork net
         & setWaitingFor
@@ -73,7 +73,7 @@ containers1 = do
 
   _jaeger <-
     run $
-      containerRequest (fromTag "jaegertracing/all-in-one:1.6")
+      containerRequest (fromTag "jaegertracing/all-in-one:1.62.0")
         & setExpose ["5775/udp", "6831/udp", "6832/udp", "5778", "16686/tcp"]
         & withNetwork net
         & setWaitingFor
@@ -81,7 +81,7 @@ containers1 = do
 
   _postgres <-
     run $
-      containerRequest (fromTag "postgres:16-alpine")
+      containerRequest (fromTag "postgres:17-alpine")
         & withCopyFileToContainer "test/data/init-script.sql" "/docker-entrypoint-initdb.d/"
 
   _helloWorld <-

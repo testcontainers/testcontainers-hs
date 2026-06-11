@@ -23,21 +23,21 @@ import TestContainers.Docker as Docker
 -- | Image for Redis database.
 --
 -- @
--- redis = fromTag "redis:5.0"
+-- redis = fromTag "redis:7.4"
 -- @
 --
 -- @since 0.1.0.0
 redis :: ToImage
 redis =
-  fromTag "redis:5.0"
+  fromTag "redis:7.4"
 
 -- | Image for Mongo database.
 --
 -- @
--- mongo = Tag "mongo:4.0.17"
+-- mongo = Tag "mongo:7.0"
 -- @
 --
 -- @since 0.1.0.0
 mongo :: ToImage
 mongo =
-  fromTag "mongo:4.0.17"
+  fromTag "mongo:7.0"
