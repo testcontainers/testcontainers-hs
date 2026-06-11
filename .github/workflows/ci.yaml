@@ -18,18 +18,17 @@ jobs:
           - ubuntu-24.04-arm
           - macos-26-intel
           - windows-latest
-        cabal: ["3.12.1.0"]
+        cabal:
+          - "3.14"
         ghc:
-          - 9.2.8
-          - 9.4.8
-          - 9.6.4
-          - 9.8.2
+          - "9.2"
+          - "9.12"
 
     steps:
     - uses: actions/checkout@v2
       if: github.event.action == 'opened' || github.event.action == 'synchronize' || github.event.ref == 'refs/heads/master'
 
-    - uses: haskell-actions/setup@v2.6.1
+    - uses: haskell-actions/setup@v2
       id: setup-haskell-cabal
       name: Setup Haskell
       with:
@@ -38,6 +37,7 @@ jobs:
 
     - name: Freeze
       run: |
+        cabal configure --enable-tests --enable-benchmarks
         cabal freeze
 
     - uses: actions/cache@v3
