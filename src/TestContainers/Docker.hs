@@ -697,7 +697,12 @@ createRyukReaper = do
         withoutReaper
         & setVolumeMounts [dockerSocketMount]
         & setExpose [ryukPort]
-        & setWaitingFor (waitUntilMappedPortReachable ryukPort)
+        -- Wait for ryuk's own startup log rather than probing its port.
+        -- A TCP probe (waitUntilMappedPortReachable) registers as a client
+        -- that immediately disconnects without sending any labels; ryuk 0.14.0
+        -- treats this as a completed session and exits with its 1 ns
+        -- reconnection timeout, so the subsequent real connection gets RST.
+        & setWaitingFor (waitForLogLine Stdout ("Started" `LazyText.isInfixOf`))
         & setRm True
 
   let (ryukContainerAddress, ryukContainerPort) =
