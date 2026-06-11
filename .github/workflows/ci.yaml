@@ -15,6 +15,7 @@ jobs:
       matrix:
         os: 
           - ubuntu-latest
+          - ubuntu-24.04-arm
           - macos-26-intel
           - windows-latest
         cabal: ["3.12.1.0"]
