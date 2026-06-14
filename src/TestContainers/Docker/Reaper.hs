@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module TestContainers.Docker.Reaper
   ( Reaper (..),
@@ -14,6 +15,8 @@ module TestContainers.Docker.Reaper
   )
 where
 
+import Control.Concurrent (threadDelay)
+import Control.Exception (IOException, try)
 import Control.Monad (replicateM)
 import Control.Monad.Trans.Resource (MonadResource, allocate)
 import Data.Text (Text, pack, unpack)
@@ -84,24 +87,12 @@ newRyukReaper host port = do
   (_releaseKey, (_socket, ryuk)) <-
     allocate
       ( do
-          let hints =
-                Socket.defaultHints {Socket.addrSocketType = Socket.Stream}
-          address <-
-            head <$> Socket.getAddrInfo (Just hints) (Just (unpack host)) (Just (show port))
-          socket <-
-            Socket.socket
-              (Socket.addrFamily address)
-              (Socket.addrSocketType address)
-              (Socket.addrProtocol address)
-          Socket.connect socket (Socket.addrAddress address)
-
-          -- Construct the reaper and regiter the session with it.
-          -- Doing it here intead of in the teardown (like we did before)
+          socket <- connectWithRetry 60
+          -- Construct the reaper and register the session with it.
+          -- Doing it here instead of in the teardown (like we did before)
           -- guarantees the Reaper knows about our session.
-          let reaper =
-                newReaper sessionId (Ryuk socket)
+          let reaper = newReaper sessionId (Ryuk socket)
           register reaper sessionIdLabel sessionId
-
           pure (socket, reaper)
       )
       ( \(socket, _ryuk) -> do
@@ -111,6 +102,29 @@ newRyukReaper host port = do
       )
 
   pure ryuk
+  where
+    -- On macOS (Docker Desktop / Colima), port-forwarding from the VM to the
+    -- host can lag a moment behind the container's own "Started" log line.
+    -- Retry the connect rather than failing immediately.
+    connectWithRetry :: Int -> IO Socket.Socket
+    connectWithRetry 0 = do
+      let hints = Socket.defaultHints {Socket.addrSocketType = Socket.Stream}
+      address <- head <$> Socket.getAddrInfo (Just hints) (Just (unpack host)) (Just (show port))
+      socket <- Socket.socket (Socket.addrFamily address) (Socket.addrSocketType address) (Socket.addrProtocol address)
+      Socket.connect socket (Socket.addrAddress address)
+      pure socket
+    connectWithRetry attemptsLeft = do
+      let hints = Socket.defaultHints {Socket.addrSocketType = Socket.Stream}
+      address <- head <$> Socket.getAddrInfo (Just hints) (Just (unpack host)) (Just (show port))
+      socket <- Socket.socket (Socket.addrFamily address) (Socket.addrSocketType address) (Socket.addrProtocol address)
+      result <- try (Socket.connect socket (Socket.addrAddress address))
+      case result of
+        Right () ->
+          pure socket
+        Left (_ :: IOException) -> do
+          Socket.close socket
+          threadDelay 500000
+          connectWithRetry (attemptsLeft - 1)
 
 newReaper ::
   -- | Session id
