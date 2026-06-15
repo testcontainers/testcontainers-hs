@@ -3,10 +3,12 @@
 
 module TestContainers.TastySpec (main, test_all) where
 
+import qualified Data.Text.Lazy as LazyText
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
 import TestContainers.Tasty
-  ( TestContainer,
+  ( Pipe (Stdout),
+    TestContainer,
     consoleLogConsumer,
     containerRequest,
     createNetwork,
@@ -20,6 +22,7 @@ import TestContainers.Tasty
     setWaitingFor,
     successfulExit,
     waitForHttp,
+    waitForLogLine,
     waitForState,
     waitUntilMappedPortReachable,
     waitUntilTimeout,
@@ -54,7 +57,7 @@ containers1 = do
         & withNetwork net
         & withFollowLogs consoleLogConsumer
         & setWaitingFor
-          (waitUntilMappedPortReachable 5672)
+          (waitForLogLine Stdout ("started TCP listener" `LazyText.isInfixOf`))
 
   _nginx <-
     run $
