@@ -57,7 +57,7 @@ containers1 = do
         & withNetwork net
         & withFollowLogs consoleLogConsumer
         & setWaitingFor
-          (waitForLogLine Stdout ("started TCP listener" `LazyText.isInfixOf`))
+          (waitUntilTimeout 300 (waitForLogLine Stdout ("started TCP listener" `LazyText.isInfixOf`)))
 
   _nginx <-
     run $
