@@ -1122,9 +1122,13 @@ waitForLogLine whereToLook matches = waitWithLogs $ \Container {id} stdout stder
 waitUntilReady :: Container -> WaitUntilReady -> TestContainer ()
 waitUntilReady container@Container {id} input = do
   Config {configDefaultWaitTimeout} <- ask
-  interpreter $ case configDefaultWaitTimeout of
-    Just seconds -> waitUntilTimeout seconds input
-    Nothing -> input
+  interpreter $ case input of
+    WaitUntilTimeout {} ->
+      input
+    _ ->
+      case configDefaultWaitTimeout of
+        Just seconds -> waitUntilTimeout seconds input
+        Nothing -> input
   where
     interpreter :: WaitUntilReady -> TestContainer ()
     interpreter wait =
