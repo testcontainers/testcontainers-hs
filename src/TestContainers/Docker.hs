@@ -804,11 +804,20 @@ defaultToImage action =
 fromTag :: ImageTag -> ToImage
 fromTag tag = defaultToImage $ do
   tracer <- askTracer
-  output <- docker tracer ["pull", "--quiet", tag]
-  return $
-    Image
-      { tag = strip (pack output)
-      }
+  pullWithRetry tracer 3
+  where
+    pull tracer = do
+      output <- docker tracer ["pull", "--quiet", tag]
+      pure $ Image {tag = strip (pack output)}
+    pullWithRetry :: Tracer -> Int -> TestContainer Image
+    pullWithRetry tracer 0 = pull tracer
+    pullWithRetry tracer n = do
+      result <- try (pull tracer)
+      case result of
+        Right image -> pure image
+        Left (_ :: DockerException) -> do
+          liftIO (threadDelay 2000000)
+          pullWithRetry tracer (n - 1)
 
 -- | Get an `Image` from an image id. This doesn't run @docker pull@ or any other Docker command
 -- on construction.
