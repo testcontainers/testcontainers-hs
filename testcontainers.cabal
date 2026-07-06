@@ -1,6 +1,6 @@
 cabal-version:      >=1.10
 name:               testcontainers
-version:            0.5.3.0
+version:            0.5.4.0
 synopsis:           Docker containers for your integration tests.
 description:
   testcontainers is a Haskell library that provides a friendly API to
@@ -12,7 +12,7 @@ license:            MIT
 license-file:       LICENSE
 author:             Alex Biehl
 maintainer:         alex.biehl@gmail.com
-copyright:          2023 Alex Biehl
+copyright:          2026 Alex Biehl
 category:           Development
 build-type:         Simple
 extra-source-files:
@@ -21,7 +21,7 @@ extra-source-files:
   test/data/init-script.sql
 
 tested-with:
-  GHC ==8.8.4 || ==8.10.7 || ==9.0.2 || ==9.2.4 || ==9.4.2 || ==9.8.2
+  GHC ==9.2 || ==9.12
 
 source-repository head
   type:     git

@@ -1,5 +1,11 @@
 # Revision history for testcontainer-hs
 
+## 0.5.4.0 -- 2026-07-06
+
+* Added support for Windows containers (@nikita-volkov, https://github.com/testcontainers/testcontainers-hs/pull/72)
+
+* Default image versions updated for Redis, Mongo, RabbitMQ, Nginx, Jaeger and Postgres (@nikita-volkov, https://github.com/testcontainers/testcontainers-hs/pull/72)
+
 ## 0.5.3.0 -- 2026-03-31
 
 * Removed dependency on `optics-core` and `aeson-optics` (@alexbiehl, https://github.com/testcontainers/testcontainers-hs/pull/70)
